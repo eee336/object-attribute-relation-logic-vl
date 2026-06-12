@@ -1,0 +1,2 @@
+{"image_id":"example_local_fresh_banana","local_path":"tests/fixtures/images/fresh_banana.ppm","source_name":"local","source_url":"tests/fixtures/images/fresh_banana.ppm","license":"user-provided","author":null,"query":"yellow banana no black spots on table","downloaded_at":"2026-06-12T00:00:00+00:00","width":8,"height":8,"sha256":"example","split":"train","raw_metadata":{"filename":"fresh_banana.ppm","note":"Tiny committed fixture for schema illustration only."}}
+

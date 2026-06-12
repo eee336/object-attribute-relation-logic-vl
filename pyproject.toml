@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "object-attribute-relation-logic-vla"
+version = "0.1.0"
+description = "Synthetic and weak web-data MVP for Object-Attribute-Relation-Logic-Aware VLA grounding."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.23",
+    "pillow>=9.5",
+    "matplotlib>=3.6",
+    "pyyaml>=6.0",
+    "requests>=2.28",
+    "tqdm>=4.64",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+

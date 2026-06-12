@@ -1,0 +1,53 @@
+state_filtering:
+  banana_not_blackened:
+    positive_queries:
+      - "yellow banana no black spots on table"
+      - "fresh banana on kitchen table"
+      - "ripe yellow banana still good"
+    negative_queries:
+      - "blackened banana on table"
+      - "rotten banana black spots"
+      - "overripe banana dark spots"
+  unopened_drink:
+    positive_queries:
+      - "unopened water bottle on table"
+      - "sealed soda can on desk"
+      - "unopened juice bottle"
+    negative_queries:
+      - "opened water bottle"
+      - "empty plastic bottle on table"
+
+attribute_comparison:
+  largest_drink:
+    queries:
+      - "multiple drink bottles different sizes on table"
+      - "small and large soda bottles on table"
+      - "assorted beverage bottles different sizes"
+  cleanest_cup:
+    queries:
+      - "clean and dirty cups on table"
+      - "several mugs some dirty some clean"
+
+group_grounding:
+  pair_of_shoes:
+    queries:
+      - "pair of shoes on floor"
+      - "multiple pairs of shoes by door"
+      - "two pairs of sneakers on floor"
+
+affordance:
+  coffee_suitable_cup:
+    queries:
+      - "coffee mug on table"
+      - "ceramic mug suitable for coffee"
+      - "paper cup coffee cup on desk"
+
+open_vocab:
+  drinks:
+    queries:
+      - "various drinks on table bottles cans juice"
+      - "assorted beverages on kitchen table"
+  fruits:
+    queries:
+      - "assorted fruits on table apples bananas oranges"
+

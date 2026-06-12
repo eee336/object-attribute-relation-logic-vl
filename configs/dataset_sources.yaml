@@ -1,0 +1,19 @@
+sources:
+  local:
+    enabled: true
+    license: "user-provided"
+    notes: "Images are copied from a local directory. The user is responsible for use rights."
+  wikimedia:
+    enabled: true
+    api_url: "https://commons.wikimedia.org/w/api.php"
+    notes: "Uses Wikimedia Commons API metadata and records author/license/source URL."
+  huggingface:
+    enabled: false
+    notes: "Reserved extension point."
+  open_images:
+    enabled: false
+    notes: "Reserved extension point for metadata/subset import."
+  unsplash:
+    enabled: false
+    env_key: "UNSPLASH_ACCESS_KEY"
+    notes: "Reserved extension point; no key is hard-coded."
