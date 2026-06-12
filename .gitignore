@@ -11,6 +11,11 @@ __pycache__/
 *.ckpt
 *.safetensors
 
+checkpoints/*.pt
+checkpoints/*.pth
+checkpoints/*.ckpt
+!checkpoints/.gitkeep
+
 outputs/*.png
 outputs/*.json
 outputs/*.csv

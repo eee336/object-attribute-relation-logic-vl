@@ -222,13 +222,122 @@ python scripts/suggest_queries.py \
 
 The first version uses rules to suggest more data for low-accuracy or under-sampled task types such as blackened bananas, pair of shoes, coffee-suitable cups, and largest drinks.
 
+## OARL-VLA Model Architecture
+
+The trainable model in `src/oarlvla/models/` is a tiny symbolic OARL-VLA prototype. It is not a large-scale pretrained VLA. Its role is to verify that the project schema can drive a learnable loop:
+
+```text
+scene/image features + instruction + object tokens + relation graph
+→ multimodal fusion
+→ target grounding
+→ program/task prediction
+→ action prediction
+→ multi-task loss
+```
+
+```mermaid
+flowchart TD
+    A[Instruction] --> B[Text Encoder]
+    C[Image / Scene] --> D[Image or Symbolic Encoder]
+    E[Object Features] --> F[Object Token Encoder]
+    G[Relation Graph] --> H[Relation Graph Encoder]
+    B --> I[Multimodal Fusion]
+    D --> I
+    F --> H
+    H --> I
+    I --> J[Target Grounding Head]
+    I --> K[Program Head]
+    J --> L[Selected Target Token]
+    L --> M[Action Head]
+    K --> N[Program Type / Logic Class]
+    M --> O[Robot Action]
+```
+
+Current components:
+
+- `SimpleTokenizer` plus GRU `TextEncoder`, with no large tokenizer dependency.
+- `ObjectEncoder` over a fixed 35-dimensional symbolic feature vector.
+- Attribute/state inputs: `black_spot_ratio`, `ripeness`, `is_blackened`, `is_rotten`, `is_edible`, `volume_ml`, `fill_level`, `is_opened`, `is_empty`, `cleanliness`, `is_broken`, `is_wearable`.
+- `SimpleRelationGraphEncoder`, a lightweight batched message-passing layer over `edge_index` and `edge_type`; it does not require PyG.
+- `CrossAttentionFusion`, where object tokens attend to instruction/image context.
+- `TargetGroundingHead`, producing `[batch, num_candidates]` target logits.
+- `ProgramHead`, currently predicting task/program type classification rather than autoregressive programs.
+- `ActionHead`, predicting `[x, y, gripper]` from the selected/fused target token.
+- Multi-task loss: `target_loss + 0.5 * action_loss + 0.2 * program_loss`.
+
+The raw image path is reserved through `SimpleCNNImageEncoder` (`image_mode=cnn_stub`), but the default training path is `image_mode=symbolic`, using synthetic scene object features.
+
+Install PyTorch before model training:
+
+```bash
+pip install torch
+```
+
+or:
+
+```bash
+pip install -r requirements.txt
+```
+
+If PyTorch is unavailable, model scripts fail with a clear install message. GPU is not required; all scripts default to CPU.
+
+### Train Tiny VLA
+
+```bash
+python scripts/generate_dataset.py \
+  --num-scenes 200 \
+  --objects-per-scene 12 \
+  --seed 42 \
+  --output data/oarlvla_synthetic.jsonl
+
+python scripts/train_vla.py \
+  --dataset data/oarlvla_synthetic.jsonl \
+  --epochs 2 \
+  --batch-size 16 \
+  --hidden-dim 128 \
+  --output checkpoints/oarlvla_tiny.pt
+```
+
+The checkpoint stores model weights, config, tokenizer vocabulary, feature metadata, and training history. Checkpoints are ignored by Git except `checkpoints/.gitkeep`.
+
+### Evaluate Tiny VLA
+
+```bash
+python scripts/eval_vla.py \
+  --dataset data/oarlvla_synthetic.jsonl \
+  --checkpoint checkpoints/oarlvla_tiny.pt
+```
+
+The evaluator prints target accuracy, program accuracy, action MSE, task breakdown, and rule/baseline comparison.
+
+### Tiny Overfit Sanity Check
+
+```bash
+python scripts/overfit_tiny_batch.py
+```
+
+This generates a tiny synthetic batch and trains until the target grounding head can overfit it. It is a fast sanity check for forward pass, loss, optimizer, dataset, collate, and checkpoint plumbing.
+
+### Model Limits and Upgrade Path
+
+Current implementation is a tiny symbolic OARL-VLA prototype, not a pretrained robotics foundation model. It validates object tokens, attribute/state features, relation graph encoding, instruction encoding, target grounding, action prediction, and multi-task training.
+
+Upgrade path:
+
+- Replace `TextEncoder` with Qwen, LLaMA, or another pretrained language/VLM text tower.
+- Replace `SimpleCNNImageEncoder` with CLIP, SigLIP, DINOv2, or a task-specific visual encoder.
+- Feed object candidates from GroundingDINO/OWL-ViT plus SAM/SAM2 masks.
+- Replace the MLP action head with diffusion policy, action tokenizer, or OpenVLA-style action decoder.
+- Use web weak data for SFT/preference warm-up, then promote verified data into evaluation.
+- Use the existing reward model for RL or preference post-training.
+
 ## Tests
 
 ```bash
 pytest -q
 ```
 
-Tests cover taxonomy, states, attributes, groups, relations, instruction generation, program execution, benchmark execution, visualization, manifest schema, query config loading, local directory import, sha256 dedup, quality filtering, pseudo labeling, web task export, and review HTML. Network logic is not required by tests.
+Tests cover taxonomy, states, attributes, groups, relations, instruction generation, program execution, benchmark execution, visualization, manifest schema, query config loading, local directory import, sha256 dedup, quality filtering, pseudo labeling, web task export, review HTML, model forward shape, model backward training step, checkpoint save/load, and tiny-batch overfit. Network logic is not required by tests.
 
 ## Future VLM / VLA Integration
 
@@ -266,4 +375,3 @@ gh repo create object-attribute-relation-logic-vla --public --source=. --remote=
 ```
 
 Never commit API keys, tokens, cookies, SSH private keys, `.env`, model weights, virtual environments, caches, large datasets, or real image dumps.
-

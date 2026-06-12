@@ -163,6 +163,8 @@ def print_benchmark_report(results: dict[str, Any]) -> str:
 def sample_to_jsonl_row(scene, example) -> dict[str, Any]:
     return {
         "scene_id": scene.id,
+        "width": scene.width,
+        "height": scene.height,
         "instruction": example.instruction,
         "program": example.program,
         "target_id": example.target_id,
@@ -170,5 +172,6 @@ def sample_to_jsonl_row(scene, example) -> dict[str, Any]:
         "task_type": example.task_type,
         "objects": [obj.to_dict() for obj in scene.objects],
         "groups": [grp.to_dict() for grp in scene.groups],
+        "history": [event.to_dict() for event in scene.history],
         "reasoning_steps": example.reasoning_steps,
     }
