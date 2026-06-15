@@ -23,17 +23,78 @@ def generate_grid_scene(seed: int = 0, grid_size: int = 8, cell_size: int = 64, 
     height = grid_size * cell_size
     objects: list[ObjectInstance] = []
     groups: list[ObjectGroup] = []
+    occupied: set[tuple[int, int]] = set()
+    category_counts: dict[str, int] = {}
+
+    def free_cells() -> list[tuple[int, int]]:
+        cells = [(col, row) for row in range(grid_size) for col in range(grid_size) if (col, row) not in occupied]
+        rng.shuffle(cells)
+        return cells
+
+    def claim(cell: tuple[int, int]) -> tuple[int, int]:
+        occupied.add(cell)
+        return cell
+
+    def reserve_cell(candidates: list[tuple[int, int]] | None = None) -> tuple[int, int]:
+        pool = candidates if candidates is not None else free_cells()
+        pool = [cell for cell in pool if 0 <= cell[0] < grid_size and 0 <= cell[1] < grid_size and cell not in occupied]
+        if not pool:
+            raise RuntimeError("No free grid cells left while generating a scene.")
+        rng.shuffle(pool)
+        return claim(pool[0])
+
+    def reserve_ordered_pair() -> tuple[tuple[int, int], tuple[int, int]]:
+        candidates: list[tuple[tuple[int, int], tuple[int, int]]] = []
+        available = [cell for cell in free_cells()]
+        for left in available:
+            for right in available:
+                if left == right:
+                    continue
+                if right[0] > left[0]:
+                    candidates.append((left, right))
+        if not candidates:
+            raise RuntimeError("Could not reserve ordered grid cells.")
+        rng.shuffle(candidates)
+        left, right = candidates[0]
+        claim(left)
+        claim(right)
+        return left, right
+
+    def reserve_adjacent_pair() -> tuple[tuple[int, int], tuple[int, int]]:
+        candidates: list[tuple[tuple[int, int], tuple[int, int]]] = []
+        for row in range(grid_size):
+            for col in range(grid_size):
+                for dx, dy in ((1, 0), (0, 1)):
+                    a = (col, row)
+                    b = (col + dx, row + dy)
+                    if b[0] < grid_size and b[1] < grid_size and a not in occupied and b not in occupied:
+                        candidates.append((a, b))
+        if not candidates:
+            raise RuntimeError("Could not reserve adjacent grid cells.")
+        rng.shuffle(candidates)
+        a, b = candidates[0]
+        claim(a)
+        claim(b)
+        return a, b
+
+    def reserve_far_from(ref: tuple[int, int], min_distance_cells: float = 2.0) -> tuple[int, int]:
+        candidates = []
+        for cell_candidate in free_cells():
+            dx = cell_candidate[0] - ref[0]
+            dy = cell_candidate[1] - ref[1]
+            if (dx * dx + dy * dy) ** 0.5 >= min_distance_cells:
+                candidates.append(cell_candidate)
+        return reserve_cell(candidates or None)
 
     def cell(col: int, row: int) -> tuple[float, float]:
-        jitter = cell_size * 0.07
+        jitter = cell_size * 0.16
         return ((col + 0.5) * cell_size + rng.uniform(-jitter, jitter), (row + 0.5) * cell_size + rng.uniform(-jitter, jitter))
 
     def add(
-        object_id: str,
         category: str,
-        col: int,
-        row: int,
+        grid_cell: tuple[int, int],
         *,
+        object_id: str | None = None,
         color: str,
         size: float = 0.22,
         shape: str | None = None,
@@ -43,8 +104,12 @@ def generate_grid_scene(seed: int = 0, grid_size: int = 8, cell_size: int = 64, 
         group_id: str | None = None,
         history_tags: list[str] | None = None,
     ) -> ObjectInstance:
+        category_counts[category] = category_counts.get(category, 0) + 1
+        if object_id is None:
+            object_id = f"{category}_{category_counts[category]}"
+        col, row = grid_cell
         center = cell(col, row)
-        sprite = cell_size * 0.58
+        sprite = cell_size * rng.uniform(0.50, 0.70)
         bbox = (center[0] - sprite / 2, center[1] - sprite / 2, center[0] + sprite / 2, center[1] + sprite / 2)
         obj = ObjectInstance(
             id=object_id,
@@ -64,17 +129,49 @@ def generate_grid_scene(seed: int = 0, grid_size: int = 8, cell_size: int = 64, 
         objects.append(obj)
         return obj
 
+    trash_cell = reserve_cell()
+    add("trash_bin", trash_cell, object_id="trash_bin_1", color="gray", shape="bin", material="plastic", size=0.5, states={"is_opened": True})
+
+    bottle_cell, orange_cell = reserve_ordered_pair()
+    bottle_fill = rng.uniform(0.35, 0.95)
+    add(
+        "bottle",
+        bottle_cell,
+        object_id="bottle_1",
+        color="green",
+        shape="cylinder",
+        material="plastic",
+        size=0.31,
+        attributes={"volume_ml": 750, "liquid_type": "tea"},
+        states=drink_states(rng.choice([False, False, True]), bottle_fill),
+    )
+    add("orange", orange_cell, object_id="orange_1", color="orange", shape="round", material="fruit_skin", states={"is_rotten": False, "is_edible": True})
+
+    spoon_cell, cup_cell = reserve_ordered_pair()
+    add("spoon", spoon_cell, object_id="spoon_1", color="silver", shape="slender", material="metal", size=0.10)
+    add(
+        "cup",
+        cup_cell,
+        object_id="cup_1",
+        color="white",
+        shape="cylinder",
+        material="plastic",
+        size=0.19,
+        attributes={"cleanliness": rng.uniform(0.72, 0.98), "capacity_ml": 250},
+        states=cup_states(False),
+    )
+
     banana_specs = [
-        ("banana_1", 1, 4, 0.60, 0.05),
-        ("banana_2", 2, 4, 0.78, 0.18),
-        ("banana_3", 3, 4, 0.98, 0.76),
+        ("banana_1", rng.uniform(0.52, 0.75), rng.uniform(0.02, 0.16)),
+        ("banana_2", rng.uniform(0.72, 0.88), rng.uniform(0.16, 0.32)),
+        ("banana_3", rng.uniform(0.96, 1.00), rng.uniform(0.70, 0.92)),
     ]
-    for object_id, col, row, ripeness, spots in banana_specs:
+    rng.shuffle(banana_specs)
+    for object_id, ripeness, spots in banana_specs:
         add(
-            object_id,
             "banana",
-            col,
-            row,
+            reserve_cell(),
+            object_id=object_id,
             color="yellow" if spots < 0.35 else "brown",
             shape="curved",
             material="fruit_skin",
@@ -82,30 +179,48 @@ def generate_grid_scene(seed: int = 0, grid_size: int = 8, cell_size: int = 64, 
             states=banana_states(ripeness, spots),
         )
 
-    add("apple_1", "apple", 5, 4, color="red", shape="round", material="fruit_skin", states={"is_rotten": False, "is_edible": True})
-    add("orange_1", "orange", 6, 1, color="orange", shape="round", material="fruit_skin", states={"is_rotten": False, "is_edible": True})
-    add("trash_bin_1", "trash_bin", 7, 7, color="gray", shape="bin", material="plastic", size=0.5, states={"is_opened": True})
+    add("apple", reserve_far_from(trash_cell), object_id="apple_1", color="red", shape="round", material="fruit_skin", states={"is_rotten": False, "is_edible": True})
+    add("soda_can", reserve_cell(), object_id="soda_can_1", color="red", shape="cylinder", material="metal", size=0.16, attributes={"volume_ml": 330, "liquid_type": "soda"}, states=drink_states(rng.choice([False, True]), rng.uniform(0.25, 1.0)))
+    add("juice_box", reserve_cell(), object_id="juice_box_1", color="blue", shape="box", material="paper", size=0.26, attributes={"volume_ml": 1000, "liquid_type": "juice"}, states=drink_states(rng.choice([False, True]), rng.uniform(0.15, 0.8)))
+    add("water_bottle", reserve_cell(), object_id="water_bottle_1", color="clear", shape="cylinder", material="plastic", size=0.18, attributes={"volume_ml": 500, "liquid_type": "water"}, states=drink_states(False, rng.uniform(0.02, 0.55)))
 
-    add("bottle_1", "bottle", 1, 1, color="green", shape="cylinder", material="plastic", size=0.31, attributes={"volume_ml": 750, "liquid_type": "tea"}, states=drink_states(False, 0.80))
-    add("soda_can_1", "soda_can", 2, 1, color="red", shape="cylinder", material="metal", size=0.16, attributes={"volume_ml": 330, "liquid_type": "soda"}, states=drink_states(False, 0.95))
-    add("juice_box_1", "juice_box", 3, 1, color="blue", shape="box", material="paper", size=0.26, attributes={"volume_ml": 1000, "liquid_type": "juice"}, states=drink_states(True, 0.35))
-    add("water_bottle_1", "water_bottle", 4, 1, color="clear", shape="cylinder", material="plastic", size=0.18, attributes={"volume_ml": 500, "liquid_type": "water"}, states=drink_states(False, 0.02))
+    add(
+        "cup",
+        reserve_cell(),
+        object_id="cup_2",
+        color="gray",
+        shape="cylinder",
+        material="plastic",
+        size=0.18,
+        attributes={"cleanliness": rng.uniform(0.04, 0.35), "capacity_ml": 250},
+        states=cup_states(False),
+    )
+    add(
+        "mug",
+        reserve_cell(),
+        object_id="mug_1",
+        color="red",
+        shape="cylinder",
+        material="ceramic",
+        size=0.25,
+        attributes={"cleanliness": rng.uniform(0.45, 0.9), "capacity_ml": 350},
+        states=cup_states(False),
+    )
+    add("bowl", reserve_cell(), object_id="bowl_1", color="white", shape="round", material="ceramic", size=0.28)
 
-    add("spoon_1", "spoon", 4, 3, color="silver", shape="slender", material="metal", size=0.10)
-    add("cup_1", "cup", 5, 3, color="white", shape="cylinder", material="plastic", size=0.19, attributes={"cleanliness": 0.92, "capacity_ml": 250}, states=cup_states(False))
-    add("cup_2", "cup", 6, 3, color="gray", shape="cylinder", material="plastic", size=0.18, attributes={"cleanliness": 0.25, "capacity_ml": 250}, states=cup_states(False))
-    add("mug_1", "mug", 5, 5, color="red", shape="cylinder", material="ceramic", size=0.25, attributes={"cleanliness": 0.78, "capacity_ml": 350}, states=cup_states(False))
-    add("bowl_1", "bowl", 4, 5, color="white", shape="round", material="ceramic", size=0.28)
-
+    pair1_cells = reserve_adjacent_pair()
+    pair2_cells = reserve_adjacent_pair()
+    pair1_clean = rng.uniform(0.65, 0.96)
+    pair2_clean = rng.uniform(0.18, 0.58)
     pair1 = [
-        add("shoe_pair_1_left", "shoe", 6, 6, color="black", shape="shoe", material="leather", size=0.18, attributes={"side": "left", "cleanliness": 0.75}, states=shoe_states(True), group_id="shoe_pair_1"),
-        add("shoe_pair_1_right", "shoe", 7, 6, color="black", shape="shoe", material="leather", size=0.18, attributes={"side": "right", "cleanliness": 0.78}, states=shoe_states(True), group_id="shoe_pair_1"),
+        add("shoe", pair1_cells[0], object_id="shoe_pair_1_left", color="black", shape="shoe", material="leather", size=0.18, attributes={"side": "left", "cleanliness": pair1_clean}, states=shoe_states(True), group_id="shoe_pair_1"),
+        add("shoe", pair1_cells[1], object_id="shoe_pair_1_right", color="black", shape="shoe", material="leather", size=0.18, attributes={"side": "right", "cleanliness": min(0.99, pair1_clean + rng.uniform(-0.04, 0.04))}, states=shoe_states(True), group_id="shoe_pair_1"),
     ]
     pair2 = [
-        add("shoe_pair_2_left", "shoe", 0, 0, color="black", shape="shoe", material="leather", size=0.18, attributes={"side": "left", "cleanliness": 0.42}, states=shoe_states(True), group_id="shoe_pair_2"),
-        add("shoe_pair_2_right", "shoe", 1, 0, color="black", shape="shoe", material="leather", size=0.18, attributes={"side": "right", "cleanliness": 0.45}, states=shoe_states(True), group_id="shoe_pair_2"),
+        add("shoe", pair2_cells[0], object_id="shoe_pair_2_left", color="black", shape="shoe", material="leather", size=0.18, attributes={"side": "left", "cleanliness": pair2_clean}, states=shoe_states(True), group_id="shoe_pair_2"),
+        add("shoe", pair2_cells[1], object_id="shoe_pair_2_right", color="black", shape="shoe", material="leather", size=0.18, attributes={"side": "right", "cleanliness": min(0.99, pair2_clean + rng.uniform(-0.04, 0.04))}, states=shoe_states(True), group_id="shoe_pair_2"),
     ]
-    for pair_id, members, clean in [("shoe_pair_1", pair1, 0.76), ("shoe_pair_2", pair2, 0.43)]:
+    for pair_id, members, clean in [("shoe_pair_1", pair1, pair1_clean), ("shoe_pair_2", pair2, pair2_clean)]:
         groups.append(
             ObjectGroup(
                 id=pair_id,
@@ -120,9 +235,10 @@ def generate_grid_scene(seed: int = 0, grid_size: int = 8, cell_size: int = 64, 
             )
         )
 
+    book_cells = reserve_adjacent_pair()
     books = [
-        add("book_1", "book", 2, 6, color="blue", shape="rectangle", material="paper", size=0.20),
-        add("book_2", "book", 2, 7, color="green", shape="rectangle", material="paper", size=0.18),
+        add("book", book_cells[0], object_id="book_1", color="blue", shape="rectangle", material="paper", size=0.20),
+        add("book", book_cells[1], object_id="book_2", color="green", shape="rectangle", material="paper", size=0.18),
     ]
     groups.append(
         ObjectGroup(
@@ -137,7 +253,18 @@ def generate_grid_scene(seed: int = 0, grid_size: int = 8, cell_size: int = 64, 
             bbox=build_group_bbox([book.bbox for book in books]),
         )
     )
-    add("remote_1", "remote", 0, 5, color="black", shape="rectangle", material="plastic", size=0.16, history_tags=["just_put_down"])
+
+    add("remote", reserve_cell(), object_id="remote_1", color="black", shape="rectangle", material="plastic", size=0.16, history_tags=["just_put_down"])
+
+    optional_specs = [
+        ("apple", {"color": "red", "shape": "round", "material": "fruit_skin", "states": {"is_rotten": False, "is_edible": True}}),
+        ("banana", {"color": "yellow", "shape": "curved", "material": "fruit_skin", "attributes": {"ripeness": 0.70, "black_spot_ratio": 0.12}, "states": banana_states(0.70, 0.12)}),
+        ("cup", {"color": "white", "shape": "cylinder", "material": "plastic", "attributes": {"cleanliness": rng.uniform(0.2, 0.95), "capacity_ml": 250}, "states": cup_states(False)}),
+        ("book", {"color": "blue", "shape": "rectangle", "material": "paper"}),
+    ]
+    for category, kwargs in rng.sample(optional_specs, k=rng.randint(0, min(3, len(optional_specs)))):
+        if free_cells():
+            add(category, reserve_cell(), **kwargs)
 
     history = [SceneEvent("put_down", "remote_1", 100, "The user just put down remote_1 on the grid.")]
     return Scene(scene_id or f"grid_{seed:06d}", width, height, objects, groups, history)

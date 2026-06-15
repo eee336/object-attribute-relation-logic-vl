@@ -329,6 +329,8 @@ Stage 1 is a controllable 2D grid world with generated transparent household-obj
 
 The generated asset set covers common household objects such as apples, bananas, oranges, bottles, cups, mugs, shoes, spoons, bowls, trash bins, books, and remotes. These assets are created locally, so the category labels remain deterministic and license-clean.
 
+Each scene samples a fresh layout, object scale jitter, state combination, shoe-pair/book-stack placement, and optional distractor objects while preserving the relation constraints needed by the instruction templates.
+
 Generate a gold grid/cutout dataset:
 
 ```bash
