@@ -120,6 +120,91 @@ def parse_instruction(instruction: str) -> Program:
             ],
             task_type="affordance",
         )
+    if "object used for writing" in text or "thing used for writing" in text or "object for writing" in text:
+        return Program(
+            [ProgramStep("filter", {"super_category": "readable_object"}), ProgramStep("select_best")],
+            task_type="open_vocab",
+        )
+    if "edible object" in text or "something you can eat" in text or "object that can be eaten" in text:
+        return Program(
+            [ProgramStep("filter", {"super_category": "fruit"}), ProgramStep("argmax", {"attribute": "ripeness"})],
+            task_type="open_vocab",
+        )
+    if "thing used for drinking" in text or "drinking container" in text or "drinking-related" in text:
+        return Program(
+            [ProgramStep("filter", {"super_category": "drinkware"}), ProgramStep("argmax", {"attribute": "cleanliness"})],
+            task_type="open_vocab",
+        )
+    if "something to carry liquids" in text or "used for storing liquids" in text or "object used for storing liquids" in text:
+        return Program(
+            [ProgramStep("filter", {"super_category": "container"}), ProgramStep("select_best")],
+            task_type="open_vocab",
+        )
+    if re.search(r"\ba container\b|\bthe container\b", text):
+        return Program(
+            [ProgramStep("filter", {"super_category": "container"}), ProgramStep("argmax", {"attribute": "size"})],
+            task_type="open_vocab",
+        )
+
+    if re.search(r"\balmost clean|kinda clean|not too dirty|roughly clean|kind of clean", text):
+        subject = _fuzzy_subject(text)
+        if subject == "banana":
+            return Program(
+                [ProgramStep("filter", {"category": "banana"}), ProgramStep("argmin", {"attribute": "black_spot_ratio"})],
+                task_type="fuzzy_attribute",
+            )
+        if subject in {"cup", "mug", "drinkware"}:
+            return Program(
+                [
+                    ProgramStep("filter", {"super_category": "drinkware"}),
+                    ProgramStep("filter_threshold", {"attribute": "cleanliness", "op": ">=", "value": 0.35}),
+                    ProgramStep("argmax", {"attribute": "cleanliness"}),
+                ],
+                task_type="fuzzy_attribute",
+            )
+        return Program(
+            [ProgramStep("filter", {"super_category": "drinkware"}), ProgramStep("argmax", {"attribute": "cleanliness"})],
+            task_type="fuzzy_attribute",
+        )
+
+    if re.search(r"\bkinda fresh|almost fresh|not too black|looks fresh|seems fresh", text):
+        subject = _fuzzy_subject(text)
+        if subject == "banana":
+            return Program(
+                [
+                    ProgramStep("filter", {"category": subject}),
+                    ProgramStep("filter_state", {"key": "is_blackened", "value": False}),
+                    ProgramStep("argmin", {"attribute": "black_spot_ratio"}),
+                ],
+                task_type="fuzzy_attribute",
+            )
+        if subject in {"drink", "drinkware"}:
+            return Program(
+                [ProgramStep("filter", {"super_category": "drink"}), ProgramStep("argmax", {"attribute": "fill_level"})],
+                task_type="fuzzy_attribute",
+            )
+        return Program(
+            [ProgramStep("filter", {"super_category": "fruit"}), ProgramStep("argmax", {"attribute": "ripeness"})],
+            task_type="fuzzy_attribute",
+        )
+
+    if re.search(r"\broughly biggest|roughly largest|roughly big|roughly huge", text):
+        subject = _fuzzy_subject(text)
+        if subject in {"banana", "apple", "orange"}:
+            return Program(
+                [ProgramStep("filter", {"category": subject}), ProgramStep("argmax", {"attribute": "size"})],
+                task_type="fuzzy_attribute",
+            )
+        if subject == "drink":
+            return Program(
+                [ProgramStep("filter", {"super_category": "drink"}), ProgramStep("argmax", {"attribute": "volume_ml", "fallback": "size"})],
+                task_type="fuzzy_attribute",
+            )
+        return Program(
+            [ProgramStep("filter", {"super_category": "container"}), ProgramStep("argmax", {"attribute": "size"})],
+            task_type="fuzzy_attribute",
+        )
+
     if "edible fruit" in text or "can eat" in text:
         return Program(
             [
@@ -324,9 +409,28 @@ def _last_known_term(text: str) -> str:
         "bowl",
         "book",
         "remote",
+        "container",
         "object",
     ]
     for term in terms:
         if re.search(rf"\b{re.escape(term)}s?\b", text):
             return term
     return "object"
+
+
+def _fuzzy_subject(text: str) -> str | None:
+    terms = [
+        "banana",
+        "cup",
+        "mug",
+        "drink",
+        "drinkware",
+        "fruit",
+        "container",
+        "apple",
+        "orange",
+    ]
+    for term in terms:
+        if re.search(rf"\b{re.escape(term)}s?\b", text):
+            return term
+    return None

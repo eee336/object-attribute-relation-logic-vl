@@ -22,6 +22,7 @@ outputs/*.json
 outputs/*.csv
 outputs/*.html
 outputs/*.yaml
+outputs/*.md
 !outputs/.gitkeep
 
 data/*.jsonl
@@ -35,6 +36,7 @@ data/user_images/*
 data/grid_images/*
 data/grid_assets/*
 data/grid_asset_raw/*
+data/training_bundle/
 !data/.gitkeep
 !data/raw_images/.gitkeep
 !data/processed_images/.gitkeep

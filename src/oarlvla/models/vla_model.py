@@ -33,6 +33,7 @@ class OARLVLAConfig:
     qwen_device_map: str | None = None
     image_mode: str = "symbolic"
     image_channels: int = 3
+    use_relation_graph: bool = True
     dropout: float = 0.1
 
     def to_dict(self) -> dict[str, Any]:
@@ -106,7 +107,7 @@ class OARLVLAModel(nn.Module):
         elif isinstance(relation_features, (tuple, list)) and len(relation_features) >= 2:
             edge_index, edge_type = relation_features[0], relation_features[1]
 
-        if edge_index is not None and edge_type is not None:
+        if self.config.use_relation_graph and edge_index is not None and edge_type is not None:
             object_tokens = self.graph_encoder(object_tokens, edge_index, edge_type, relation_mask)
 
         image_embedding = None

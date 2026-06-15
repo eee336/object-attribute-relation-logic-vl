@@ -22,6 +22,7 @@ def vla_collate_fn(samples: list[dict[str, Any]]) -> dict[str, Any]:
     target_index = torch.stack([sample["target_index"] for sample in samples], dim=0)
     target_center = torch.stack([sample["target_center"] for sample in samples], dim=0)
     task_type_id = torch.stack([sample["task_type_id"] for sample in samples], dim=0)
+    has_gold_target = torch.tensor([bool(sample.get("has_gold_target", sample.get("target_id") is not None)) for sample in samples], dtype=torch.bool)
 
     for idx, sample in enumerate(samples):
         num_objects = sample["object_features"].shape[0]
@@ -43,6 +44,7 @@ def vla_collate_fn(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "target_index": target_index,
         "target_center": target_center,
         "task_type_id": task_type_id,
+        "has_gold_target": has_gold_target,
         "sample_id": [sample["sample_id"] for sample in samples],
         "instruction": [sample["instruction"] for sample in samples],
         "task_type": [sample["task_type"] for sample in samples],

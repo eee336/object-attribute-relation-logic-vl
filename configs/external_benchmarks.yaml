@@ -1,0 +1,91 @@
+benchmarks:
+  libero:
+    status: planned
+    upstream:
+      project: "LIBERO"
+      url: "https://github.com/Lifelong-Robot-Learning/LIBERO"
+      docs: "https://libero-project.github.io/main.html"
+    role_for_oarl_vla: "Target selector and object-logic grounding module before policy execution."
+    evaluation_focus:
+      - language_conditioned_target_accuracy
+      - wrong_object_rate
+      - task_success_rate
+      - per_suite_generalization
+    planned_suites:
+      - libero_spatial
+      - libero_object
+      - libero_goal
+      - libero_10
+      - libero_90
+    adapter_contract:
+      input:
+        - rgb_observation
+        - language_instruction
+        - optional_object_candidates
+      output:
+        - target_id_or_description
+        - target_conditioned_action
+        - reasoning_trace
+
+  maniskill:
+    status: planned
+    upstream:
+      project: "ManiSkill"
+      url: "https://github.com/mani-skill/ManiSkill"
+      docs: "https://maniskill.readthedocs.io/en/latest/user_guide/index.html"
+    role_for_oarl_vla: "Use simulator object metadata, segmentation, or detected candidates to train/evaluate object-logic target grounding."
+    evaluation_focus:
+      - target_accuracy_from_sim_metadata
+      - wrong_object_rate
+      - action_success_with_target_conditioning
+      - sim_to_visual_generalization
+    planned_task_families:
+      - pick_and_place
+      - open_close
+      - rearrangement
+      - cluttered_tabletop
+    adapter_contract:
+      input:
+        - rgbd_or_state_observation
+        - task_language
+        - simulator_object_metadata
+      output:
+        - selected_object_instance
+        - target_pose_or_bbox
+        - action_conditioning
+
+  robomimic:
+    status: planned
+    upstream:
+      project: "robomimic"
+      url: "https://robomimic.github.io/"
+      docs: "https://robomimic.github.io/docs/introduction/overview.html"
+    role_for_oarl_vla: "Offline IL evaluation and future export target once OARL-VLA produces observation-action trajectories."
+    evaluation_focus:
+      - imitation_success_rate
+      - target_conditioning_ablation
+      - wrong_object_events_in_replay
+    planned_datasets:
+      - lift
+      - can
+      - square
+      - transport
+      - tool_hang
+    adapter_contract:
+      input:
+        - robomimic_hdf5_observation
+        - language_or_task_metadata
+        - optional_object_metadata
+      output:
+        - target_conditioned_policy_input
+        - robomimic_compatible_action
+
+notes:
+  dependency_policy: "Keep heavy benchmark dependencies outside the core package. Add adapters behind optional imports."
+  current_training_bundle: "data/training_bundle/training_manifest.json"
+  current_compute_commands: "data/training_bundle/compute_training_commands.sh"
+  first_integration_priority:
+    - "LIBERO target-grounding evaluation from language-conditioned tasks"
+    - "ManiSkill metadata-supervised target grounding and action conditioning"
+    - "robomimic offline trajectory export after policy action head matures"
+

@@ -17,6 +17,8 @@ TASK_TYPES = [
     "negation",
     "history_reference",
     "affordance",
+    "open_vocab",
+    "fuzzy_attribute",
 ]
 
 
@@ -68,6 +70,19 @@ TEMPLATES: dict[str, list[str]] = {
     "affordance": [
         "Pick the object suitable for drinking coffee.",
     ],
+    "open_vocab": [
+        "Pick a container.",
+        "Pick the drinking container.",
+        "Pick a thing used for drinking.",
+        "Pick an object used for storing liquids.",
+        "Pick the drinking-related object.",
+    ],
+    "fuzzy_attribute": [
+        "Pick an almost clean cup.",
+        "Pick a kinda fresh banana.",
+        "Pick the not too dirty cup.",
+        "Pick a roughly biggest drink.",
+    ],
 }
 
 
@@ -111,4 +126,3 @@ def generate_instruction(scene: Scene, instruction_type: str | None = None, seed
         task_type=task_type,
         reasoning_steps=last_result.steps,
     )
-

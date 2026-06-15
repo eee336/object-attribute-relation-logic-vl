@@ -34,7 +34,12 @@ def model_inputs(batch: dict[str, Any], qwen_processor: Any | None = None, devic
         "relation_mask": batch["relation_mask"],
     }
     if qwen_processor is not None:
-        inputs["qwen_inputs"] = qwen_processor(batch["instruction"], image_paths=None, device=device)
+        image_paths = batch.get("image_path")
+        inputs["qwen_inputs"] = qwen_processor(
+            batch["instruction"],
+            image_paths=list(image_paths) if image_paths is not None else None,
+            device=device,
+        )
     return inputs
 
 
@@ -61,8 +66,22 @@ def train_epoch(model, dataloader, optimizer, config: TrainConfig) -> dict[str, 
 def evaluate_model(model, dataloader, config: TrainConfig) -> dict[str, Any]:
     model.eval()
     totals = defaultdict(float)
-    by_task = defaultdict(lambda: {"n": 0, "target_correct": 0, "program_correct": 0, "action_mse_sum": 0.0})
+    by_task = defaultdict(
+        lambda: {
+            "n": 0,
+            "target_n": 0,
+            "target_correct": 0,
+            "program_correct": 0,
+            "action_n": 0,
+            "action_mse_sum": 0.0,
+        }
+    )
     n = 0
+    target_n = 0
+    target_correct = 0
+    program_correct = 0
+    action_n = 0
+    action_mse_sum = 0.0
     for batch in dataloader:
         batch = batch_to_device(batch, config.device)
         outputs = model(**model_inputs(batch, config.qwen_processor, config.device))
@@ -77,19 +96,34 @@ def evaluate_model(model, dataloader, config: TrainConfig) -> dict[str, Any]:
         for idx in range(batch_n):
             task_type = batch["task_type"][idx]
             valid = int(batch["target_index"][idx].item()) >= 0
+            has_gold_target = bool(batch.get("has_gold_target", torch.ones(batch_n, dtype=torch.bool, device=batch["target_index"].device))[idx].item())
             by_task[task_type]["n"] += 1
-            if valid and int(target_pred[idx].item()) == int(batch["target_index"][idx].item()):
-                by_task[task_type]["target_correct"] += 1
             if int(program_pred[idx].item()) == int(batch["task_type_id"][idx].item()):
+                program_correct += 1
                 by_task[task_type]["program_correct"] += 1
-            by_task[task_type]["action_mse_sum"] += float(action_sq[idx].detach().cpu())
+            if valid and int(target_pred[idx].item()) == int(batch["target_index"][idx].item()):
+                target_correct += 1
+                by_task[task_type]["target_correct"] += 1
+            if has_gold_target:
+                target_n += 1
+                by_task[task_type]["target_n"] += 1
+            if valid:
+                action_n += 1
+                by_task[task_type]["action_n"] += 1
+                item_action_mse = float(action_sq[idx].detach().cpu())
+                action_mse_sum += item_action_mse
+                by_task[task_type]["action_mse_sum"] += item_action_mse
     result = {key: value / max(n, 1) for key, value in totals.items()}
+    result["target_accuracy"] = target_correct / target_n if target_n else 0.0
+    result["program_accuracy"] = program_correct / n if n else 0.0
+    result["action_mse"] = action_mse_sum / action_n if action_n else 0.0
     result["by_task"] = {
         task: {
             "n": stats["n"],
-            "target_accuracy": stats["target_correct"] / stats["n"] if stats["n"] else 0.0,
+            "target_n": stats["target_n"],
+            "target_accuracy": stats["target_correct"] / stats["target_n"] if stats["target_n"] else 0.0,
             "program_accuracy": stats["program_correct"] / stats["n"] if stats["n"] else 0.0,
-            "action_mse": stats["action_mse_sum"] / stats["n"] if stats["n"] else 0.0,
+            "action_mse": stats["action_mse_sum"] / stats["action_n"] if stats["action_n"] else 0.0,
         }
         for task, stats in sorted(by_task.items())
     }
@@ -97,4 +131,7 @@ def evaluate_model(model, dataloader, config: TrainConfig) -> dict[str, Any]:
 
 
 def make_optimizer(model, lr: float = 1e-3):
-    return torch.optim.AdamW(model.parameters(), lr=lr)
+    trainable_params = [param for param in model.parameters() if param.requires_grad]
+    if not trainable_params:
+        raise ValueError("No trainable parameters found. Check --train-modules/--freeze-modules.")
+    return torch.optim.AdamW(trainable_params, lr=lr)

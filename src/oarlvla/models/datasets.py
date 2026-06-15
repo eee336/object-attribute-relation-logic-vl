@@ -83,9 +83,31 @@ FEATURE_NAMES = [
     "member_count",
 ]
 
+ATTRIBUTE_STATE_FEATURES = [
+    "black_spot_ratio",
+    "ripeness",
+    "is_blackened",
+    "is_rotten",
+    "is_edible",
+    "volume_ml",
+    "fill_level",
+    "is_opened",
+    "is_empty",
+    "cleanliness",
+    "is_broken",
+    "is_wearable",
+]
+
 
 class SyntheticVLADataset(torch.utils.data.Dataset):
-    def __init__(self, jsonl_path: str | Path, tokenizer: SimpleTokenizer | None = None, max_length: int = 32):
+    def __init__(
+        self,
+        jsonl_path: str | Path,
+        tokenizer: SimpleTokenizer | None = None,
+        max_length: int = 32,
+        ablate_feature_groups: list[str] | None = None,
+        include_groups: bool = True,
+    ):
         self.path = Path(jsonl_path)
         self.rows = read_jsonl(self.path)
         if not self.rows:
@@ -94,6 +116,8 @@ class SyntheticVLADataset(torch.utils.data.Dataset):
         if tokenizer is None:
             self.tokenizer.build_vocab([row["instruction"] for row in self.rows])
         self.max_length = max_length
+        self.include_groups = include_groups
+        self.feature_ablation_indices = feature_ablation_indices(ablate_feature_groups or [])
         self.feature_metadata = feature_metadata()
 
     def __len__(self) -> int:
@@ -101,13 +125,16 @@ class SyntheticVLADataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
         row = self.rows[idx]
-        candidates = candidate_entities(row)
+        candidates = candidate_entities(row, include_groups=self.include_groups)
         candidate_ids = [entity["id"] for entity in candidates]
         target_id = row.get("target_id")
         target_index = candidate_ids.index(target_id) if target_id in candidate_ids else -1
         width = float(row.get("width") or 640)
         height = float(row.get("height") or 480)
-        object_features = [entity_to_features(entity, width, height) for entity in candidates]
+        object_features = [
+            apply_feature_ablation(entity_to_features(entity, width, height), self.feature_ablation_indices)
+            for entity in candidates
+        ]
         edge_index, edge_type = build_relation_edges(candidates, width, height)
         if target_index >= 0:
             center = candidates[target_index].get("center", [0.0, 0.0])
@@ -128,6 +155,7 @@ class SyntheticVLADataset(torch.utils.data.Dataset):
             "task_type": task_type,
             "candidate_ids": candidate_ids,
             "target_id": target_id,
+            "has_gold_target": target_id is not None,
             "image_path": row.get("image_path"),
             "label_quality": row.get("label_quality", "gold"),
             "source": row.get("source", "synthetic"),
@@ -137,13 +165,20 @@ class SyntheticVLADataset(torch.utils.data.Dataset):
 class WebWeakVLADataset(torch.utils.data.Dataset):
     """Weak web tasks. Samples without verified target_id use target_index=-1."""
 
-    def __init__(self, jsonl_path: str | Path, tokenizer: SimpleTokenizer | None = None, max_length: int = 32):
+    def __init__(
+        self,
+        jsonl_path: str | Path,
+        tokenizer: SimpleTokenizer | None = None,
+        max_length: int = 32,
+        ablate_feature_groups: list[str] | None = None,
+    ):
         self.path = Path(jsonl_path)
         self.rows = read_jsonl(self.path)
         self.tokenizer = tokenizer or SimpleTokenizer(max_length=max_length)
         if tokenizer is None and self.rows:
             self.tokenizer.build_vocab([row["instruction"] for row in self.rows])
         self.max_length = max_length
+        self.feature_ablation_indices = feature_ablation_indices(ablate_feature_groups or [])
         self.feature_metadata = feature_metadata()
 
     def __len__(self) -> int:
@@ -156,7 +191,10 @@ class WebWeakVLADataset(torch.utils.data.Dataset):
             "sample_id": row.get("image_id", f"web_{idx}"),
             "instruction": row["instruction"],
             "instruction_ids": torch.tensor(self.tokenizer.encode(row["instruction"], self.max_length), dtype=torch.long),
-            "object_features": torch.zeros(1, len(FEATURE_NAMES), dtype=torch.float32),
+            "object_features": torch.tensor(
+                [apply_feature_ablation([0.0] * len(FEATURE_NAMES), self.feature_ablation_indices)],
+                dtype=torch.float32,
+            ),
             "relation_edges": torch.zeros(0, 2, dtype=torch.long),
             "relation_types": torch.zeros(0, dtype=torch.long),
             "target_index": torch.tensor(-1, dtype=torch.long),
@@ -165,9 +203,78 @@ class WebWeakVLADataset(torch.utils.data.Dataset):
             "task_type": task_type,
             "candidate_ids": ["unknown_candidate"],
             "target_id": row.get("target_id"),
+            "has_gold_target": False,
+            "image_path": row.get("image_path"),
             "label_quality": row.get("label_quality", "weak"),
             "source": "web",
         }
+
+
+class MixedVLADataset(torch.utils.data.Dataset):
+    """Gold synthetic/grid data plus weak web tasks under one tokenizer.
+
+    Weak web samples usually have no verified target id. The training loss
+    already masks target/action supervision for target_index=-1, so these rows
+    contribute program/task supervision without corrupting grounding labels.
+    """
+
+    def __init__(
+        self,
+        synthetic_jsonl_path: str | Path,
+        web_weak_jsonl_path: str | Path | None = None,
+        tokenizer: SimpleTokenizer | None = None,
+        max_length: int = 32,
+        web_repeat: int = 1,
+        ablate_feature_groups: list[str] | None = None,
+        include_groups: bool = True,
+    ):
+        self.synthetic_path = Path(synthetic_jsonl_path)
+        self.web_weak_path = Path(web_weak_jsonl_path) if web_weak_jsonl_path else None
+        self.max_length = max_length
+        self.tokenizer = tokenizer or SimpleTokenizer(max_length=max_length)
+        if tokenizer is None:
+            instructions = [row["instruction"] for row in read_jsonl(self.synthetic_path)]
+            if self.web_weak_path is not None and self.web_weak_path.exists():
+                instructions.extend(row["instruction"] for row in read_jsonl(self.web_weak_path))
+            self.tokenizer.build_vocab(instructions)
+
+        self.datasets: list[torch.utils.data.Dataset] = [
+            SyntheticVLADataset(
+                self.synthetic_path,
+                tokenizer=self.tokenizer,
+                max_length=max_length,
+                ablate_feature_groups=ablate_feature_groups,
+                include_groups=include_groups,
+            )
+        ]
+        if self.web_weak_path is not None and self.web_weak_path.exists():
+            web_dataset = WebWeakVLADataset(
+                self.web_weak_path,
+                tokenizer=self.tokenizer,
+                max_length=max_length,
+                ablate_feature_groups=ablate_feature_groups,
+            )
+            if len(web_dataset) > 0:
+                self.datasets.extend(web_dataset for _ in range(max(1, int(web_repeat))))
+        self.feature_metadata = feature_metadata()
+        self._offsets: list[tuple[int, torch.utils.data.Dataset]] = []
+        offset = 0
+        for dataset in self.datasets:
+            offset += len(dataset)
+            self._offsets.append((offset, dataset))
+
+    def __len__(self) -> int:
+        return self._offsets[-1][0] if self._offsets else 0
+
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        if idx < 0:
+            idx = len(self) + idx
+        previous = 0
+        for end, dataset in self._offsets:
+            if idx < end:
+                return dataset[idx - previous]
+            previous = end
+        raise IndexError(idx)
 
 
 def feature_metadata() -> dict[str, Any]:
@@ -184,10 +291,33 @@ def feature_metadata() -> dict[str, Any]:
     }
 
 
-def candidate_entities(row: dict[str, Any]) -> list[dict[str, Any]]:
+def candidate_entities(row: dict[str, Any], include_groups: bool = True) -> list[dict[str, Any]]:
     objects = [dict(obj, is_group=False) for obj in row.get("objects", [])]
-    groups = [dict(group, is_group=True) for group in row.get("groups", [])]
+    groups = [dict(group, is_group=True) for group in row.get("groups", [])] if include_groups else []
     return objects + groups
+
+
+def feature_ablation_indices(groups: list[str]) -> set[int]:
+    names: set[str] = set()
+    for group in groups:
+        if group == "attribute_state":
+            names.update(ATTRIBUTE_STATE_FEATURES)
+        elif group == "geometry":
+            names.update({"bbox_x1", "bbox_y1", "bbox_x2", "bbox_y2", "center_x", "center_y", "size"})
+        elif group in FEATURE_NAMES:
+            names.add(group)
+        elif group:
+            raise ValueError(f"Unsupported feature ablation group: {group}")
+    return {FEATURE_NAMES.index(name) for name in names}
+
+
+def apply_feature_ablation(values: list[float], indices: set[int]) -> list[float]:
+    if not indices:
+        return values
+    values = list(values)
+    for idx in indices:
+        values[idx] = 0.0
+    return values
 
 
 def entity_to_features(entity: dict[str, Any], width: float, height: float) -> list[float]:

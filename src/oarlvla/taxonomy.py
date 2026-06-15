@@ -33,6 +33,16 @@ ALIASES: dict[str, str] = {
     "drinkware": "drinkware",
     "coffee cup": "drinkware",
     "coffee mug": "mug",
+    "vessel": "container",
+    "vessels": "container",
+    "holder": "container",
+    "liquid container": "container",
+    "drinking container": "drinkware",
+    "drinking vessel": "drinkware",
+    "edible": "fruit",
+    "writeable": "readable_object",
+    "writable": "readable_object",
+    "edibility": "fruit",
     "water": "water_bottle",
 }
 
@@ -71,4 +81,3 @@ def is_drink(category: str, super_categories: list[str] | None = None) -> bool:
 
 def is_fruit(category: str, super_categories: list[str] | None = None) -> bool:
     return "fruit" in (super_categories or get_super_categories(category))
-

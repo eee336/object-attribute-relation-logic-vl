@@ -46,6 +46,27 @@ flowchart TD
 - Visualization: annotated PNG output, with matplotlib/Pillow path when installed and a pure-stdlib PNG fallback.
 - Web data: local directory source, Wikimedia source, manifest, exact hash dedup, pseudo labeler, quality filter, review HTML, SFT and preference exports.
 
+## 与论文目标对应的完成度
+
+当前已经落地的主线：
+
+- 目标选择显式建模：`ObjectToken/ObjectGroup -> 逻辑程序 -> TargetGroundingHead`（不是直接 `image+text -> action`）。
+- 错抓失败机制是核心指标之一：`target_accuracy / wrong-object` 已有可执行定义。
+- 合成金标场景与真实图片 weak data 两条数据线同时存在，且都有 provenance、复核与训练导出。
+- 支持的任务类型已覆盖你文本里提到的关键面：`spatial / ordinal / attribute / state / taxonomy / group / negation / affordance / history / open_vocab / fuzzy_attribute`。
+
+还缺口：
+
+- 没有把训练固定为标准 `train / val / test` 流程；stage-2 真实图像训练还缺一个默认基准脚本。
+- 任务程序头目前是任务分类（program type），还没演进到完整程序 token 序列生成。
+- 开放词表/模糊描述（fuzzy/open-vocab）已补基础规则与模板，但还建议扩展更多自然语言变体并做泛化消融。
+
+下一步推荐顺序：
+
+1. 固定 split 后跑两版对比（带/不带 target head）。
+2. 用 weak web data 做小规模预热，再接 Stage-1 synthetic checkpoint。
+3. 在 `eval_vla.py` 输出按任务类型的 `wrong-object` + `target accuracy` 可对齐图表。
+
 ## Supported Instruction Types
 
 - `spatial_relation`: nearest/farthest/left/right/between.
@@ -57,6 +78,8 @@ flowchart TD
 - `negation`: fruit not near trash bin, not opened drink, not empty bottle.
 - `history_reference`: object just put down or moved most recently.
 - `affordance`: object suitable for drinking coffee.
+- `open_vocab`: container, drinking container, writable object, edible object（开放词表/同义改写）。
+- `fuzzy_attribute`: almost clean, kinda fresh, not too dirty, roughly biggest（模糊表达约束）。
 
 The first version uses English templates. The parser and generator are structured so Chinese templates can be added later.
 
@@ -318,7 +341,19 @@ python scripts/train_vla.py \
   --epochs 2 \
   --batch-size 16 \
   --hidden-dim 128 \
+  --val-ratio 0.2 \
   --output checkpoints/oarlvla_tiny.pt
+```
+
+如果你想用单独验证集文件：
+
+```bash
+python scripts/train_vla.py \
+  --dataset data/oarlvla_synthetic.jsonl \
+  --eval-dataset data/oarlvla_synthetic_val.jsonl \
+  --epochs 2 \
+  --batch-size 16 \
+  --hidden-dim 128
 ```
 
 The checkpoint stores model weights, config, tokenizer vocabulary, feature metadata, and training history. Checkpoints are ignored by Git except `checkpoints/.gitkeep`.
@@ -381,6 +416,7 @@ python scripts/train_vla.py \
   --epochs 20 \
   --batch-size 32 \
   --hidden-dim 128 \
+  --val-ratio 0.15 \
   --output checkpoints/oarlvla_grid_stage1.pt
 
 python scripts/eval_vla.py \
@@ -407,6 +443,68 @@ python scripts/eval_vla.py \
 ```
 
 The evaluator prints target accuracy, program accuracy, action MSE, task breakdown, and rule/baseline comparison.
+
+### Stage Pipeline
+
+For reproducible staged experiments, use the pipeline runner:
+
+```bash
+python scripts/run_stage_pipeline.py --stage all --quick
+```
+
+Stages:
+
+- `stage0`: synthetic data, symbolic benchmark, and paper tables.
+- `stage1`: grid/cutout image data, tiny VLA training, and gold evaluation.
+- `stage2`: weak web task construction plus mixed gold/weak VLA training.
+
+Stage-2 weak web samples usually do not have verified target ids. The trainer masks target/action losses for those rows and keeps program/task supervision, so weak labels do not become fake grounding truth.
+
+Default freezing policy:
+
+- Stage 1 grid/cutout: train all tiny OARL-VLA modules from scratch.
+- Stage 2 synthetic + web weak: load Stage-1 checkpoint and freeze `object_encoder`, `graph_encoder`, and `action_head`; train text/fusion/target/program layers.
+- Optional Qwen-VL: the Qwen-VL base model is frozen by default; OARL projection/fusion/heads train unless `--unfreeze-qwen-vl` is passed.
+
+You can run each stage separately:
+
+```bash
+python scripts/run_stage_pipeline.py --stage stage0
+python scripts/run_stage_pipeline.py --stage stage1 --quick
+python scripts/run_stage_pipeline.py --stage stage2 --quick
+```
+
+Manual Stage-2 mixed training:
+
+```bash
+python scripts/build_web_dataset.py \
+  --source local \
+  --input-dir tests/fixtures/images \
+  --queries configs/web_queries.yaml \
+  --max-per-query 2 \
+  --output-dir data/web_dataset \
+  --mode metadata_only
+
+python scripts/train_vla.py \
+  --dataset data/oarlvla_synthetic.jsonl \
+  --web-weak-dataset data/web_tasks.jsonl \
+  --eval-dataset data/oarlvla_synthetic.jsonl \
+  --epochs 1 \
+  --batch-size 16 \
+  --hidden-dim 128 \
+  --output checkpoints/oarlvla_stage2_web_weak.pt
+```
+
+AAAI ablation suite:
+
+```bash
+python scripts/run_aaai_ablation_suite.py \
+  --dataset data/oarlvla_grid_sprites.jsonl \
+  --epochs 2 \
+  --batch-size 16
+```
+
+It runs learned variants for `full`, `no_relation_graph`, `no_attribute_state`, `no_group_candidates`, and `no_program_supervision`.
 
 ### Tiny Overfit Sanity Check
 
@@ -448,6 +546,24 @@ Suggested next integrations:
 - Qwen-VL, InternVL, LLaVA, or Florence-2 for attribute/state descriptions.
 - A learned program generator trained on synthetic gold programs.
 - A real VLA policy that consumes image, object candidates, instruction, and grounded target.
+
+## Paper Draft
+
+论文草稿见 [PAPER.md](PAPER.md)。该文件给出完整的论文叙事结构（背景、方法、实验、指标、复现实验清单），以及“错误抓取”与对象逻辑 grounding 的研究主线。
+
+AAAI 投稿路线见 [AAAI_SUBMISSION_PLAN.md](AAAI_SUBMISSION_PLAN.md)。该文件对齐近年 AAAI VLA 论文脉络，明确当前论文应主打 `wrong-object manipulation + OARL-Bench + target-first VLA`，并列出 AAAI 主文必须补齐的实验。
+
+训练迁移清单见 [TRAINING_READINESS.md](TRAINING_READINESS.md)。当前已经生成 `data/training_bundle/`，包含 train/val/test split、manifest 和可在算力机器执行的 `compute_training_commands.sh`。
+
+LIBERO / ManiSkill / robomimic 后续评测配置见 [configs/external_benchmarks.yaml](configs/external_benchmarks.yaml)，当前作为 optional adapters 规划，不引入重依赖。
+
+你可以用下面命令把基准结果转成论文可贴表格：
+
+```bash
+python scripts/make_paper_tables.py \
+  --input outputs/benchmark_results.json \
+  --out-md outputs/benchmark_paper_tables.md
+```
 
 ## GitHub Push
 
