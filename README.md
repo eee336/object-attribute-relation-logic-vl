@@ -331,6 +331,8 @@ The asset set covers common household objects such as apples, bananas, oranges, 
 
 Each scene samples a fresh layout, object scale jitter, state combination, shoe-pair/book-stack placement, and optional distractor objects while preserving the relation constraints needed by the instruction templates.
 
+Training renders do not draw group bounding boxes or other target hints. For visual debugging only, pass `--debug-group-boxes` to `scripts/generate_grid_dataset.py`; group membership remains available in JSONL annotations either way.
+
 Download and preprocess web cutout assets:
 
 ```bash
