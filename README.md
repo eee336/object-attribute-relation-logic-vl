@@ -323,6 +323,60 @@ python scripts/train_vla.py \
 
 The checkpoint stores model weights, config, tokenizer vocabulary, feature metadata, and training history. Checkpoints are ignored by Git except `checkpoints/.gitkeep`.
 
+### Stage 1 Grid/Sprite Pretraining
+
+Stage 1 is a controllable 2D grid world with small sprite-like object images. It is designed to train object binding, spatial/ordinal relations, group grounding, history reference, affordance, state filtering, and target-conditioned action before moving to noisy real RGB images.
+
+Generate a gold grid/sprite dataset:
+
+```bash
+python scripts/generate_grid_dataset.py \
+  --num-scenes 1000 \
+  --grid-size 8 \
+  --cell-size 64 \
+  --seed 42 \
+  --output data/oarlvla_grid_sprites.jsonl \
+  --image-dir data/grid_images
+```
+
+Each row includes:
+
+```text
+image_path
+objects / groups
+instruction
+program
+target_id / target_type
+target_bbox / target_center
+label_quality=gold
+source=synthetic_grid
+```
+
+Train and evaluate the Stage 1 VLA baseline:
+
+```bash
+python scripts/train_vla.py \
+  --dataset data/oarlvla_grid_sprites.jsonl \
+  --epochs 20 \
+  --batch-size 32 \
+  --hidden-dim 128 \
+  --output checkpoints/oarlvla_grid_stage1.pt
+
+python scripts/eval_vla.py \
+  --dataset data/oarlvla_grid_sprites.jsonl \
+  --checkpoint checkpoints/oarlvla_grid_stage1.pt
+```
+
+Current local Stage 1 result on 1000 generated samples:
+
+```text
+Target Accuracy: 0.651
+Program Accuracy: 0.659
+Action MSE: 0.020135
+```
+
+Strong task slices include history reference, ordinal relation, affordance, and group grounding. Negation and some comparison/spatial cases remain useful targets for the next curriculum iteration.
+
 ### Evaluate Tiny VLA
 
 ```bash

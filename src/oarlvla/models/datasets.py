@@ -128,8 +128,9 @@ class SyntheticVLADataset(torch.utils.data.Dataset):
             "task_type": task_type,
             "candidate_ids": candidate_ids,
             "target_id": target_id,
-            "label_quality": "gold",
-            "source": "synthetic",
+            "image_path": row.get("image_path"),
+            "label_quality": row.get("label_quality", "gold"),
+            "source": row.get("source", "synthetic"),
         }
 
 
@@ -292,4 +293,3 @@ def _bool(mapping: dict[str, Any], key: str) -> float:
 def _bbox_from_center(center: list[float]) -> list[float]:
     x, y = center
     return [x - 16, y - 16, x + 16, y + 16]
-

@@ -48,6 +48,7 @@ def vla_collate_fn(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "task_type": [sample["task_type"] for sample in samples],
         "candidate_ids": [sample["candidate_ids"] for sample in samples],
         "target_id": [sample["target_id"] for sample in samples],
+        "image_path": [sample.get("image_path") for sample in samples],
         "label_quality": [sample["label_quality"] for sample in samples],
     }
 
@@ -57,4 +58,3 @@ def batch_to_device(batch: dict[str, Any], device: str):
     for key, value in batch.items():
         moved[key] = value.to(device) if hasattr(value, "to") else value
     return moved
-
