@@ -1,0 +1,63 @@
+state_filtering:
+  banana_not_blackened:
+    positive_queries:
+      - "banana"
+      - "yellow banana"
+      - "ripe banana"
+    negative_queries:
+      - "overripe banana"
+      - "black banana"
+  unopened_drink:
+    positive_queries:
+      - "water bottle"
+      - "soda can"
+      - "juice box"
+    negative_queries:
+      - "empty plastic bottle"
+
+attribute_comparison:
+  largest_drink:
+    queries:
+      - "beverage bottles"
+      - "water bottles"
+      - "soda bottles"
+  cleanest_cup:
+    queries:
+      - "coffee mug"
+      - "ceramic cup"
+      - "dirty cup"
+
+group_grounding:
+  pair_of_shoes:
+    queries:
+      - "pair of shoes"
+      - "sneakers"
+      - "shoes on floor"
+  stack_of_books:
+    queries:
+      - "stack of books"
+      - "books on table"
+
+affordance:
+  coffee_suitable_cup:
+    queries:
+      - "coffee mug"
+      - "paper coffee cup"
+      - "tea cup"
+
+open_vocab:
+  fruits:
+    queries:
+      - "apple fruit"
+      - "orange fruit"
+      - "fruit bowl"
+  containers:
+    queries:
+      - "bowl"
+      - "cup"
+      - "bottle"
+  household_objects:
+    queries:
+      - "spoon"
+      - "remote control"
+      - "trash bin"

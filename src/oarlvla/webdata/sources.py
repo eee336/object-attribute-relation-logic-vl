@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,12 +14,13 @@ except ModuleNotFoundError:
     requests = None
 
 from .dedup import sha256_file
-from .downloader import download_url
+from .downloader import HTTP_USER_AGENT, download_url
 from .image_utils import read_image_size
 from .schemas import WebImageRecord
 
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".ppm"}
+WIKIMEDIA_RASTER_MIMES = {"image/jpeg", "image/png", "image/webp", "image/bmp"}
 
 
 @dataclass
@@ -115,13 +117,14 @@ class WikimediaCommonsSource(ImageSource):
             "gsrlimit": max_results,
             "prop": "imageinfo",
             "iiprop": "url|size|mime|extmetadata",
+            "iiurlwidth": 512,
         }
         try:
             response = requests.get(
                 self.api_url,
                 params=params,
                 timeout=15,
-                headers={"User-Agent": "OARL-VLA research prototype/0.1"},
+                headers={"User-Agent": HTTP_USER_AGENT},
             )
             response.raise_for_status()
             data = response.json()
@@ -131,7 +134,11 @@ class WikimediaCommonsSource(ImageSource):
         results: list[ImageSearchResult] = []
         for page in pages.values():
             info = (page.get("imageinfo") or [{}])[0]
-            url = info.get("url")
+            mime = info.get("mime")
+            if mime not in WIKIMEDIA_RASTER_MIMES:
+                continue
+            original_url = info.get("url")
+            url = info.get("thumburl") or original_url
             if not url:
                 continue
             meta = info.get("extmetadata", {})
@@ -147,7 +154,7 @@ class WikimediaCommonsSource(ImageSource):
                     query=query,
                     license=license_name,
                     author=author,
-                    raw_metadata={"title": page.get("title"), "imageinfo": info},
+                    raw_metadata={"title": page.get("title"), "imageinfo": info, "original_url": original_url},
                 )
             )
         return results
@@ -157,6 +164,7 @@ class WikimediaCommonsSource(ImageSource):
         suffix = suffix if suffix in IMAGE_SUFFIXES else ".jpg"
         image_id = f"wikimedia_{result.result_id}"
         target_path = output_dir / "images" / f"{image_id}{suffix}"
+        time.sleep(0.75)
         download_url(result.url, target_path)
         digest = sha256_file(target_path)
         width, height = _image_size(target_path)
