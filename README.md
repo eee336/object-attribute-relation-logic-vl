@@ -323,11 +323,13 @@ python scripts/train_vla.py \
 
 The checkpoint stores model weights, config, tokenizer vocabulary, feature metadata, and training history. Checkpoints are ignored by Git except `checkpoints/.gitkeep`.
 
-### Stage 1 Grid/Sprite Pretraining
+### Stage 1 Grid/Cutout Pretraining
 
-Stage 1 is a controllable 2D grid world with small sprite-like object images. It is designed to train object binding, spatial/ordinal relations, group grounding, history reference, affordance, state filtering, and target-conditioned action before moving to noisy real RGB images.
+Stage 1 is a controllable 2D grid world with generated transparent household-object cutouts instead of text labels or letter placeholders. It is designed to train object binding, spatial/ordinal relations, group grounding, history reference, affordance, state filtering, and target-conditioned action before moving to noisy real RGB images.
 
-Generate a gold grid/sprite dataset:
+The generated asset set covers common household objects such as apples, bananas, oranges, bottles, cups, mugs, shoes, spoons, bowls, trash bins, books, and remotes. These assets are created locally, so the category labels remain deterministic and license-clean.
+
+Generate a gold grid/cutout dataset:
 
 ```bash
 python scripts/generate_grid_dataset.py \
@@ -336,8 +338,11 @@ python scripts/generate_grid_dataset.py \
   --cell-size 64 \
   --seed 42 \
   --output data/oarlvla_grid_sprites.jsonl \
-  --image-dir data/grid_images
+  --image-dir data/grid_images \
+  --asset-dir data/grid_assets
 ```
+
+The command writes ignored local artifacts under `data/grid_images`, `data/grid_assets`, and `data/oarlvla_grid_sprites.jsonl`.
 
 Each row includes:
 
@@ -367,7 +372,7 @@ python scripts/eval_vla.py \
   --checkpoint checkpoints/oarlvla_grid_stage1.pt
 ```
 
-Current local Stage 1 result on 1000 generated samples:
+Last recorded Stage 1 baseline result on 1000 generated samples:
 
 ```text
 Target Accuracy: 0.651

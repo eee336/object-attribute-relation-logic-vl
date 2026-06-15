@@ -15,13 +15,14 @@ from oarlvla.gridworld import generate_grid_dataset
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate stage-1 grid/sprite gold VLA data.")
+    parser = argparse.ArgumentParser(description="Generate stage-1 grid/cutout gold VLA data.")
     parser.add_argument("--num-scenes", type=int, default=1000)
     parser.add_argument("--grid-size", type=int, default=8)
     parser.add_argument("--cell-size", type=int, default=64)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", type=Path, default=Path("data/oarlvla_grid_sprites.jsonl"))
     parser.add_argument("--image-dir", type=Path, default=Path("data/grid_images"))
+    parser.add_argument("--asset-dir", type=Path, default=Path("data/grid_assets"))
     args = parser.parse_args()
     report = generate_grid_dataset(
         num_scenes=args.num_scenes,
@@ -30,6 +31,7 @@ def main() -> None:
         seed=args.seed,
         output=args.output,
         image_dir=args.image_dir,
+        asset_dir=args.asset_dir,
     )
     print(json.dumps(report, indent=2, ensure_ascii=False))
 

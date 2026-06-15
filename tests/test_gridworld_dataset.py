@@ -15,6 +15,7 @@ def test_gridworld_dataset_generation_and_loader(tmp_path: Path):
         seed=5,
         output=output,
         image_dir=image_dir,
+        asset_dir=tmp_path / "assets",
     )
     assert report["num_samples"] == 9
     assert output.exists()
@@ -26,4 +27,3 @@ def test_gridworld_dataset_generation_and_loader(tmp_path: Path):
     batch = vla_collate_fn([dataset[0], dataset[1]])
     assert batch["object_features"].shape[0] == 2
     assert batch["object_mask"].any()
-

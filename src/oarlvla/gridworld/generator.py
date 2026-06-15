@@ -174,17 +174,19 @@ def generate_grid_dataset(
     seed: int,
     output: str | Path,
     image_dir: str | Path,
+    asset_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     output = Path(output)
     image_dir = Path(image_dir)
     output.parent.mkdir(parents=True, exist_ok=True)
     image_dir.mkdir(parents=True, exist_ok=True)
+    asset_dir = Path(asset_dir) if asset_dir else image_dir.parent / "grid_assets"
     task_counts = {task: 0 for task in TASK_TYPES}
     with output.open("w", encoding="utf-8") as f:
         for idx in range(num_scenes):
             scene = generate_grid_scene(seed + idx, grid_size=grid_size, cell_size=cell_size, scene_id=f"grid_{idx:06d}")
             image_path = image_dir / f"{scene.id}.png"
-            render_grid_scene(scene, image_path, grid_size, cell_size)
+            render_grid_scene(scene, image_path, grid_size, cell_size, asset_dir=asset_dir)
             task_type = TASK_TYPES[idx % len(TASK_TYPES)]
             row = generate_grid_sample(scene, task_type, seed + idx, image_path)
             row["grid_size"] = grid_size
@@ -194,6 +196,7 @@ def generate_grid_dataset(
     return {
         "output": str(output),
         "image_dir": str(image_dir),
+        "asset_dir": str(asset_dir),
         "num_samples": num_scenes,
         "grid_size": grid_size,
         "cell_size": cell_size,
