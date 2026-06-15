@@ -34,6 +34,7 @@ data/web_dataset/*
 data/user_images/*
 data/grid_images/*
 data/grid_assets/*
+data/grid_asset_raw/*
 !data/.gitkeep
 !data/raw_images/.gitkeep
 !data/processed_images/.gitkeep

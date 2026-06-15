@@ -325,13 +325,25 @@ The checkpoint stores model weights, config, tokenizer vocabulary, feature metad
 
 ### Stage 1 Grid/Cutout Pretraining
 
-Stage 1 is a controllable 2D grid world with generated transparent household-object cutouts instead of text labels or letter placeholders. It is designed to train object binding, spatial/ordinal relations, group grounding, history reference, affordance, state filtering, and target-conditioned action before moving to noisy real RGB images.
+Stage 1 is a controllable 2D grid world with transparent household-object cutouts instead of text labels or letter placeholders. It is designed to train object binding, spatial/ordinal relations, group grounding, history reference, affordance, state filtering, and target-conditioned action before moving to noisy real RGB images.
 
-The generated asset set covers common household objects such as apples, bananas, oranges, bottles, cups, mugs, shoes, spoons, bowls, trash bins, books, and remotes. These assets are created locally, so the category labels remain deterministic and license-clean.
+The asset set covers common household objects such as apples, bananas, oranges, bottles, cups, mugs, shoes, spoons, bowls, trash bins, books, and remotes. By default, assets can be downloaded from Wikimedia Commons, converted into transparent cutouts, and tracked with source URL, license, author, and score metadata.
 
 Each scene samples a fresh layout, object scale jitter, state combination, shoe-pair/book-stack placement, and optional distractor objects while preserving the relation constraints needed by the instruction templates.
 
-Generate a gold grid/cutout dataset:
+Download and preprocess web cutout assets:
+
+```bash
+python scripts/download_grid_assets.py \
+  --asset-dir data/grid_assets \
+  --raw-dir data/grid_asset_raw \
+  --manifest data/grid_assets_manifest.json \
+  --candidates-per-query 5 \
+  --sprite-size 192 \
+  --force
+```
+
+Then generate a gold grid/cutout dataset:
 
 ```bash
 python scripts/generate_grid_dataset.py \
@@ -344,7 +356,7 @@ python scripts/generate_grid_dataset.py \
   --asset-dir data/grid_assets
 ```
 
-The command writes ignored local artifacts under `data/grid_images`, `data/grid_assets`, and `data/oarlvla_grid_sprites.jsonl`.
+These commands write ignored local artifacts under `data/grid_images`, `data/grid_assets`, `data/grid_asset_raw`, `data/grid_assets_manifest.json`, and `data/oarlvla_grid_sprites.jsonl`.
 
 Each row includes:
 
