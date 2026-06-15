@@ -22,16 +22,20 @@ class TrainConfig:
     target_loss_weight: float = 1.0
     action_loss_weight: float = 0.5
     program_loss_weight: float = 0.2
+    qwen_processor: Any | None = None
 
 
-def model_inputs(batch: dict[str, Any]) -> dict[str, Any]:
-    return {
+def model_inputs(batch: dict[str, Any], qwen_processor: Any | None = None, device: str | None = None) -> dict[str, Any]:
+    inputs = {
         "tokenized_instruction": batch["instruction_ids"],
         "object_features": batch["object_features"],
         "relation_features": {"edge_index": batch["relation_edges"], "edge_type": batch["relation_types"]},
         "object_mask": batch["object_mask"],
         "relation_mask": batch["relation_mask"],
     }
+    if qwen_processor is not None:
+        inputs["qwen_inputs"] = qwen_processor(batch["instruction"], image_paths=None, device=device)
+    return inputs
 
 
 def train_epoch(model, dataloader, optimizer, config: TrainConfig) -> dict[str, float]:
@@ -42,7 +46,7 @@ def train_epoch(model, dataloader, optimizer, config: TrainConfig) -> dict[str, 
     for batch in dataloader:
         batch = batch_to_device(batch, config.device)
         optimizer.zero_grad(set_to_none=True)
-        outputs = model(**model_inputs(batch))
+        outputs = model(**model_inputs(batch, config.qwen_processor, config.device))
         loss, metrics = compute_vla_loss(outputs, batch, weights)
         loss.backward()
         optimizer.step()
@@ -61,7 +65,7 @@ def evaluate_model(model, dataloader, config: TrainConfig) -> dict[str, Any]:
     n = 0
     for batch in dataloader:
         batch = batch_to_device(batch, config.device)
-        outputs = model(**model_inputs(batch))
+        outputs = model(**model_inputs(batch, config.qwen_processor, config.device))
         loss, metrics = compute_vla_loss(outputs, batch)
         batch_n = int(batch["instruction_ids"].shape[0])
         n += batch_n
@@ -94,4 +98,3 @@ def evaluate_model(model, dataloader, config: TrainConfig) -> dict[str, Any]:
 
 def make_optimizer(model, lr: float = 1e-3):
     return torch.optim.AdamW(model.parameters(), lr=lr)
-

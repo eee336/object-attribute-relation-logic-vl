@@ -255,7 +255,9 @@ flowchart TD
 
 Current components:
 
-- `SimpleTokenizer` plus GRU `TextEncoder`, with no large tokenizer dependency.
+- `vlm_backbone="tiny"` keeps the lightweight `SimpleTokenizer` plus GRU `TextEncoder`, with no large tokenizer dependency.
+- `vlm_backbone="qwen_vl"` loads a Qwen-VL/Qwen2.5-VL style Hugging Face backbone through `QwenVLBackbone`; its pooled multimodal hidden state becomes the instruction/image embedding fused with object and relation tokens.
+- `QwenVLProcessorAdapter` builds Qwen chat messages and uses `AutoProcessor`; when available, `qwen-vl-utils` handles image/video preprocessing.
 - `ObjectEncoder` over a fixed 35-dimensional symbolic feature vector.
 - Attribute/state inputs: `black_spot_ratio`, `ripeness`, `is_blackened`, `is_rotten`, `is_edible`, `volume_ml`, `fill_level`, `is_opened`, `is_empty`, `cleanliness`, `is_broken`, `is_wearable`.
 - `SimpleRelationGraphEncoder`, a lightweight batched message-passing layer over `edge_index` and `edge_type`; it does not require PyG.
@@ -265,7 +267,7 @@ Current components:
 - `ActionHead`, predicting `[x, y, gripper]` from the selected/fused target token.
 - Multi-task loss: `target_loss + 0.5 * action_loss + 0.2 * program_loss`.
 
-The raw image path is reserved through `SimpleCNNImageEncoder` (`image_mode=cnn_stub`), but the default training path is `image_mode=symbolic`, using synthetic scene object features.
+The raw image path is reserved through both `SimpleCNNImageEncoder` (`image_mode=cnn_stub`) and the Qwen-VL adapter. The default fast training path remains `vlm_backbone=tiny`, `image_mode=symbolic`, using synthetic scene object features.
 
 Install PyTorch before model training:
 
@@ -280,6 +282,27 @@ pip install -r requirements.txt
 ```
 
 If PyTorch is unavailable, model scripts fail with a clear install message. GPU is not required; all scripts default to CPU.
+
+For Qwen-VL-backed experiments, install the optional VLM dependencies and choose a Qwen model checkpoint:
+
+```bash
+pip install transformers qwen-vl-utils accelerate
+```
+
+Example Qwen-VL configuration:
+
+```bash
+python scripts/train_vla.py \
+  --dataset data/oarlvla_synthetic.jsonl \
+  --epochs 1 \
+  --batch-size 2 \
+  --hidden-dim 128 \
+  --vlm-backbone qwen_vl \
+  --qwen-model-name Qwen/Qwen2.5-VL-3B-Instruct \
+  --output checkpoints/oarlvla_qwenvl_adapter.pt
+```
+
+This downloads/loads the Qwen checkpoint through Transformers. Use a small batch size on CPU; GPU or MPS is recommended for real Qwen-VL training. By default the Qwen-VL backbone is frozen and only the OARL-VLA projection/fusion/heads train.
 
 ### Train Tiny VLA
 
@@ -320,12 +343,12 @@ This generates a tiny synthetic batch and trains until the target grounding head
 
 ### Model Limits and Upgrade Path
 
-Current implementation is a tiny symbolic OARL-VLA prototype, not a pretrained robotics foundation model. It validates object tokens, attribute/state features, relation graph encoding, instruction encoding, target grounding, action prediction, and multi-task training.
+Current implementation has two modes: a tiny symbolic mode for fast CPU tests and a Qwen-VL adapter mode for VLM-backed experiments. It is still not a pretrained robotics foundation model. It validates object tokens, attribute/state features, relation graph encoding, Qwen/text instruction encoding, target grounding, action prediction, and multi-task training.
 
 Upgrade path:
 
-- Replace `TextEncoder` with Qwen, LLaMA, or another pretrained language/VLM text tower.
-- Replace `SimpleCNNImageEncoder` with CLIP, SigLIP, DINOv2, or a task-specific visual encoder.
+- Use the Qwen-VL adapter as the default multimodal backbone, then fine-tune with LoRA/QLoRA instead of full-weight training.
+- Replace or compare Qwen-VL with CLIP, SigLIP, DINOv2, InternVL, LLaVA, or a task-specific visual encoder.
 - Feed object candidates from GroundingDINO/OWL-ViT plus SAM/SAM2 masks.
 - Replace the MLP action head with diffusion policy, action tokenizer, or OpenVLA-style action decoder.
 - Use web weak data for SFT/preference warm-up, then promote verified data into evaluation.

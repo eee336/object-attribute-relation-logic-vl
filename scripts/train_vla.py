@@ -15,6 +15,7 @@ try:
     from oarlvla.models.checkpoints import save_checkpoint
     from oarlvla.models.collate import vla_collate_fn
     from oarlvla.models.datasets import SyntheticVLADataset
+    from oarlvla.models.qwen_vl import QwenVLProcessorAdapter
     from oarlvla.models.trainer import TrainConfig, evaluate_model, make_optimizer, train_epoch
     from oarlvla.models.vla_model import OARLVLAConfig, OARLVLAModel, require_torch
 except RuntimeError as exc:
@@ -33,6 +34,10 @@ def main() -> None:
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--vlm-backbone", choices=["tiny", "qwen_vl"], default="tiny")
+    parser.add_argument("--qwen-model-name", default="Qwen/Qwen2.5-VL-3B-Instruct")
+    parser.add_argument("--unfreeze-qwen-vl", action="store_true")
+    parser.add_argument("--qwen-device-map", default=None)
     parser.add_argument("--output", type=Path, default=Path("checkpoints/oarlvla_tiny.pt"))
     args = parser.parse_args()
 
@@ -45,10 +50,25 @@ def main() -> None:
         hidden_dim=args.hidden_dim,
         num_relation_types=len(dataset.feature_metadata["relation_types"]),
         num_program_types=len(dataset.feature_metadata["task_types"]),
+        vlm_backbone=args.vlm_backbone,
+        qwen_model_name=args.qwen_model_name,
+        freeze_qwen_vl=not args.unfreeze_qwen_vl,
+        qwen_device_map=args.qwen_device_map,
     )
     model = OARLVLAModel(config).to(args.device)
     optimizer = make_optimizer(model, args.lr)
-    train_config = TrainConfig(epochs=args.epochs, batch_size=args.batch_size, lr=args.lr, device=args.device)
+    qwen_processor = (
+        QwenVLProcessorAdapter(args.qwen_model_name)
+        if args.vlm_backbone == "qwen_vl"
+        else None
+    )
+    train_config = TrainConfig(
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        device=args.device,
+        qwen_processor=qwen_processor,
+    )
     history = []
     for epoch in range(1, args.epochs + 1):
         train_metrics = train_epoch(model, dataloader, optimizer, train_config)
@@ -78,4 +98,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

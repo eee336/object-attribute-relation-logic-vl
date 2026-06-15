@@ -9,6 +9,7 @@ from .fusion import CrossAttentionFusion
 from .graph_encoder import SimpleRelationGraphEncoder
 from .grounding_head import TargetGroundingHead
 from .program_head import ProgramHead
+from .qwen_vl import QwenVLBackbone
 from .torch_utils import require_torch
 
 
@@ -24,6 +25,12 @@ class OARLVLAConfig:
     num_relation_types: int = 8
     num_program_types: int = 9
     action_dim: int = 3
+    vlm_backbone: str = "tiny"
+    qwen_model_name: str = "Qwen/Qwen2.5-VL-3B-Instruct"
+    freeze_qwen_vl: bool = True
+    qwen_trust_remote_code: bool = True
+    qwen_torch_dtype: str = "auto"
+    qwen_device_map: str | None = None
     image_mode: str = "symbolic"
     image_channels: int = 3
     dropout: float = 0.1
@@ -42,7 +49,21 @@ class OARLVLAModel(nn.Module):
     def __init__(self, config: OARLVLAConfig):
         super().__init__()
         self.config = config
+        if config.vlm_backbone not in {"tiny", "qwen_vl"}:
+            raise ValueError(f"Unsupported vlm_backbone: {config.vlm_backbone}")
         self.text_encoder = TextEncoder(config.vocab_size, config.text_embed_dim, config.hidden_dim, config.dropout)
+        self.qwen_vl = (
+            QwenVLBackbone(
+                config.qwen_model_name,
+                config.hidden_dim,
+                freeze=config.freeze_qwen_vl,
+                trust_remote_code=config.qwen_trust_remote_code,
+                torch_dtype=config.qwen_torch_dtype,
+                device_map=config.qwen_device_map,
+            )
+            if config.vlm_backbone == "qwen_vl"
+            else None
+        )
         self.object_encoder = ObjectEncoder(config.object_feature_dim, config.hidden_dim, config.dropout)
         self.graph_encoder = SimpleRelationGraphEncoder(config.hidden_dim, config.num_relation_types, config.dropout)
         self.image_encoder = (
@@ -62,13 +83,19 @@ class OARLVLAModel(nn.Module):
         tokenized_instruction=None,
         object_features=None,
         relation_features=None,
+        qwen_inputs=None,
         object_mask=None,
         relation_mask=None,
     ) -> dict[str, Any]:
-        if tokenized_instruction is None or object_features is None:
-            raise ValueError("tokenized_instruction and object_features are required")
+        if object_features is None:
+            raise ValueError("object_features are required")
+        if self.qwen_vl is None and tokenized_instruction is None:
+            raise ValueError("tokenized_instruction is required when vlm_backbone='tiny'")
+        if self.qwen_vl is not None and qwen_inputs is None and tokenized_instruction is None:
+            raise ValueError("qwen_inputs or tokenized_instruction is required when vlm_backbone='qwen_vl'")
 
-        text_embedding = self.text_encoder(tokenized_instruction)
+        qwen_embedding = self.qwen_vl(qwen_inputs) if self.qwen_vl is not None and qwen_inputs is not None else None
+        text_embedding = qwen_embedding if qwen_embedding is not None else self.text_encoder(tokenized_instruction)
         object_tokens = self.object_encoder(object_features)
 
         edge_index = None
@@ -83,7 +110,9 @@ class OARLVLAModel(nn.Module):
             object_tokens = self.graph_encoder(object_tokens, edge_index, edge_type, relation_mask)
 
         image_embedding = None
-        if self.image_encoder is not None and image_features is not None:
+        if qwen_embedding is not None:
+            image_embedding = qwen_embedding
+        elif self.image_encoder is not None and image_features is not None:
             image_embedding = self.image_encoder(image_features)
         elif image_features is not None and image_features.dim() == 2:
             image_embedding = image_features

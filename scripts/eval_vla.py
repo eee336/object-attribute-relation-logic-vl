@@ -15,6 +15,7 @@ try:
     from oarlvla.models.checkpoints import load_checkpoint
     from oarlvla.models.collate import vla_collate_fn
     from oarlvla.models.datasets import SyntheticVLADataset
+    from oarlvla.models.qwen_vl import QwenVLProcessorAdapter
     from oarlvla.models.trainer import TrainConfig, evaluate_model
     from oarlvla.models.vla_model import require_torch
     from oarlvla.reasoning import LogicAwareReasoner
@@ -40,7 +41,16 @@ def main() -> None:
     model.to(args.device)
     dataset = SyntheticVLADataset(args.dataset, tokenizer=tokenizer)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False, collate_fn=vla_collate_fn)
-    metrics = evaluate_model(model, dataloader, TrainConfig(batch_size=args.batch_size, device=args.device))
+    qwen_processor = (
+        QwenVLProcessorAdapter(model.config.qwen_model_name)
+        if model.config.vlm_backbone == "qwen_vl"
+        else None
+    )
+    metrics = evaluate_model(
+        model,
+        dataloader,
+        TrainConfig(batch_size=args.batch_size, device=args.device, qwen_processor=qwen_processor),
+    )
     print(f"Target Accuracy: {metrics.get('target_accuracy', 0.0):.3f}")
     print(f"Program Accuracy: {metrics.get('program_accuracy', 0.0):.3f}")
     print(f"Action MSE: {metrics.get('action_mse', 0.0):.6f}")
