@@ -23,6 +23,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=Path("data/oarlvla_grid_sprites.jsonl"))
     parser.add_argument("--image-dir", type=Path, default=Path("data/grid_images"))
     parser.add_argument("--asset-dir", type=Path, default=Path("data/grid_assets"))
+    parser.add_argument("--debug-group-boxes", action="store_true", help="Render group bounding boxes for visual debugging.")
     args = parser.parse_args()
     report = generate_grid_dataset(
         num_scenes=args.num_scenes,
@@ -32,6 +33,7 @@ def main() -> None:
         output=args.output,
         image_dir=args.image_dir,
         asset_dir=args.asset_dir,
+        render_group_boxes=args.debug_group_boxes,
     )
     print(json.dumps(report, indent=2, ensure_ascii=False))
 

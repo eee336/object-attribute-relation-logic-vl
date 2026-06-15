@@ -14,13 +14,14 @@ def render_grid_scene(
     grid_size: int,
     cell_size: int,
     asset_dir: str | Path | None = None,
+    render_group_boxes: bool = False,
 ) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         from PIL import Image, ImageDraw
 
-        return _render_with_pillow(scene, output_path, grid_size, cell_size, asset_dir, Image, ImageDraw)
+        return _render_with_pillow(scene, output_path, grid_size, cell_size, asset_dir, render_group_boxes, Image, ImageDraw)
     except ModuleNotFoundError:
         rectangles = [
             {
@@ -34,7 +35,7 @@ def render_grid_scene(
         return write_simple_scene_png(output_path, scene.width, scene.height, rectangles)
 
 
-def _render_with_pillow(scene: Scene, output_path: Path, grid_size: int, cell_size: int, asset_dir, Image, ImageDraw) -> Path:
+def _render_with_pillow(scene: Scene, output_path: Path, grid_size: int, cell_size: int, asset_dir, render_group_boxes: bool, Image, ImageDraw) -> Path:
     image = Image.new("RGB", (scene.width, scene.height), "#f8f7f2")
     draw = ImageDraw.Draw(image)
     assets = ensure_sprite_assets(asset_dir or output_path.parent.parent / "grid_assets", sprite_size=max(96, int(cell_size * 1.8)))
@@ -43,10 +44,11 @@ def _render_with_pillow(scene: Scene, output_path: Path, grid_size: int, cell_si
         y = i * cell_size
         draw.line((x, 0, x, scene.height), fill="#d6d2c4", width=1)
         draw.line((0, y, scene.width, y), fill="#d6d2c4", width=1)
-    for group in scene.groups:
-        if group.bbox:
-            x1, y1, x2, y2 = group.bbox
-            draw.rounded_rectangle((x1 - 4, y1 - 4, x2 + 4, y2 + 4), radius=6, outline="#7b2cbf", width=3)
+    if render_group_boxes:
+        for group in scene.groups:
+            if group.bbox:
+                x1, y1, x2, y2 = group.bbox
+                draw.rounded_rectangle((x1 - 4, y1 - 4, x2 + 4, y2 + 4), radius=6, outline="#7b2cbf", width=3)
     for obj in scene.objects:
         _paste_sprite(image, draw, obj, assets)
     image.save(output_path)
