@@ -93,7 +93,29 @@ def _matches_prefix(name: str, prefixes: list[str]) -> bool:
     return any(name == prefix or name.startswith(prefix + ".") for prefix in prefixes)
 
 
+def _expand_module_prefixes(prefixes: list[str] | None) -> list[str] | None:
+    if prefixes is None:
+        return None
+    aliases = {
+        "object_encoder": "oarl_core.object_encoder",
+        "graph_encoder": "oarl_core.graph_encoder",
+        "fusion": "oarl_core.fusion",
+        "target_head": "oarl_core.target_head",
+        "global_norm": "oarl_core.global_norm",
+        "region_encoder": "oarl_core.region_encoder",
+        "oarl_adapter": "oarl_core",
+    }
+    expanded: list[str] = []
+    for prefix in prefixes:
+        expanded.append(prefix)
+        if prefix in aliases:
+            expanded.append(aliases[prefix])
+    return expanded
+
+
 def apply_freezing(model: OARLVLAModel, train_modules: list[str] | None, freeze_modules: list[str]) -> dict:
+    train_modules = _expand_module_prefixes(train_modules)
+    freeze_modules = _expand_module_prefixes(freeze_modules) or []
     if train_modules:
         for name, param in model.named_parameters():
             param.requires_grad = _matches_prefix(name, train_modules)
@@ -128,6 +150,11 @@ def main() -> None:
     parser.add_argument("--target-loss-weight", type=float, default=1.0)
     parser.add_argument("--action-loss-weight", type=float, default=0.5)
     parser.add_argument("--program-loss-weight", type=float, default=0.2)
+    parser.add_argument("--action-head-type", choices=["mlp", "flow_matching"], default=None)
+    parser.add_argument("--action-chunk-size", type=int, default=None)
+    parser.add_argument("--action-denoise-steps", type=int, default=None)
+    parser.add_argument("--action-head-layers", type=int, default=None)
+    parser.add_argument("--action-head-heads", type=int, default=None)
     parser.add_argument("--val-ratio", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--eval-dataset", type=Path, default=None)
@@ -164,6 +191,20 @@ def main() -> None:
             extend_tokenizer_from_paths(tokenizer, [args.dataset, args.web_weak_dataset, args.eval_dataset])
             resize_text_embeddings(model, len(tokenizer))
         model.config.use_relation_graph = not args.no_relation_graph
+        if (
+            args.action_head_type is not None
+            or args.action_chunk_size is not None
+            or args.action_denoise_steps is not None
+            or args.action_head_layers is not None
+            or args.action_head_heads is not None
+        ):
+            model.replace_action_head(
+                args.action_head_type or model.config.action_head_type,
+                action_chunk_size=args.action_chunk_size,
+                action_denoise_steps=args.action_denoise_steps,
+                action_head_layers=args.action_head_layers,
+                action_head_heads=args.action_head_heads,
+            )
         print(f"Loaded initial checkpoint: {args.init_checkpoint}")
 
     dataset = build_train_dataset(args, tokenizer=tokenizer)
@@ -204,6 +245,11 @@ def main() -> None:
             hidden_dim=args.hidden_dim,
             num_relation_types=len(dataset.feature_metadata["relation_types"]),
             num_program_types=len(dataset.feature_metadata["task_types"]),
+            action_head_type=args.action_head_type or "flow_matching",
+            action_chunk_size=args.action_chunk_size or 8,
+            action_denoise_steps=args.action_denoise_steps or 10,
+            action_head_layers=args.action_head_layers or 2,
+            action_head_heads=args.action_head_heads or 4,
             vlm_backbone=args.vlm_backbone,
             qwen_model_name=args.qwen_model_name,
             freeze_qwen_vl=not args.unfreeze_qwen_vl,

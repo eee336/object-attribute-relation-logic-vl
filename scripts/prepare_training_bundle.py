@@ -153,6 +153,10 @@ def build_train_commands(args, manifest: dict[str, Any]) -> dict[str, list[str]]
             args.batch_size,
             "--hidden-dim",
             args.hidden_dim,
+            "--action-head-type",
+            "flow_matching",
+            "--action-chunk-size",
+            args.action_chunk_size,
             "--output",
             args.stage1_checkpoint,
         ),
@@ -177,6 +181,10 @@ def build_train_commands(args, manifest: dict[str, Any]) -> dict[str, list[str]]
             args.batch_size,
             "--hidden-dim",
             args.hidden_dim,
+            "--action-head-type",
+            "flow_matching",
+            "--action-chunk-size",
+            args.action_chunk_size,
             "--init-checkpoint",
             args.stage1_checkpoint,
             "--extend-tokenizer",
@@ -237,6 +245,7 @@ def main() -> None:
     parser.add_argument("--web-mode", choices=["metadata_only", "heuristic", "model_assisted"], default="metadata_only")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--hidden-dim", type=int, default=128)
+    parser.add_argument("--action-chunk-size", type=int, default=8)
     parser.add_argument("--stage1-epochs", type=int, default=20)
     parser.add_argument("--stage2-epochs", type=int, default=5)
     parser.add_argument("--ablation-epochs", type=int, default=5)

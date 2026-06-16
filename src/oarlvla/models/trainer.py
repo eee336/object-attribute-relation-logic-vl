@@ -33,6 +33,12 @@ def model_inputs(batch: dict[str, Any], qwen_processor: Any | None = None, devic
         "object_mask": batch["object_mask"],
         "relation_mask": batch["relation_mask"],
     }
+    if "object_region_features" in batch:
+        inputs["object_region_features"] = batch["object_region_features"]
+    if "action_chunk" in batch:
+        inputs["action_labels"] = batch["action_chunk"]
+    elif "target_center" in batch:
+        inputs["action_labels"] = batch["target_center"]
     if qwen_processor is not None:
         image_paths = batch.get("image_path")
         inputs["qwen_inputs"] = qwen_processor(

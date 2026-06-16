@@ -41,11 +41,19 @@ def compute_vla_loss(outputs: dict, batch: dict, weights: VLALossWeights | None 
         action_label = batch["target_center"][valid_mask].to(device)
         action_pred = outputs["action_pred"][valid_mask]
         action_dims = min(action_pred.shape[-1], action_label.shape[-1])
-        action_loss = F.mse_loss(action_pred[:, :action_dims], action_label[:, :action_dims])
+        action_mse = F.mse_loss(action_pred[:, :action_dims], action_label[:, :action_dims])
+        action_flow_losses = outputs.get("action_flow_losses")
+        if action_flow_losses is not None:
+            action_loss = action_flow_losses[valid_mask].mean()
+            metrics["action_flow_loss"] = float(action_loss.detach().cpu())
+        else:
+            action_loss = action_mse
+            metrics["action_flow_loss"] = 0.0
         total = total + weights.action_loss_weight * action_loss
-        metrics["action_mse"] = float(action_loss.detach().cpu())
+        metrics["action_mse"] = float(action_mse.detach().cpu())
     else:
         metrics["action_mse"] = 0.0
+        metrics["action_flow_loss"] = 0.0
 
     if outputs.get("program_logits") is not None and "task_type_id" in batch:
         program_loss = F.cross_entropy(outputs["program_logits"], batch["task_type_id"].long().to(device))

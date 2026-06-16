@@ -40,7 +40,13 @@ def load_checkpoint(path: str | Path, map_location: str = "cpu") -> tuple[OARLVL
         payload = torch.load(path, map_location=map_location)
     config = OARLVLAConfig.from_dict(payload["config"])
     model = OARLVLAModel(config)
-    model.load_state_dict(payload["model_state"])
+    missing, unexpected = model.load_state_dict(
+        _remap_legacy_oarl_adapter_keys(payload["model_state"]),
+        strict=False,
+    )
+    allowed_missing = {"oarl_core.object_region_norm.weight", "oarl_core.object_region_norm.bias"}
+    if set(missing) - allowed_missing or unexpected:
+        raise RuntimeError(f"Checkpoint mismatch: missing={missing}, unexpected={unexpected}")
     tokenizer = SimpleTokenizer.from_dict(payload["tokenizer"])
     return model, tokenizer, payload.get("feature_metadata", {}), payload.get("extra", {})
 
@@ -55,3 +61,29 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
+
+
+def _remap_legacy_oarl_adapter_keys(state_dict: dict[str, Any]) -> dict[str, Any]:
+    """Load checkpoints saved before the OARL reasoning core was named explicitly."""
+    legacy_prefixes = {
+        "object_encoder.": "oarl_core.object_encoder.",
+        "graph_encoder.": "oarl_core.graph_encoder.",
+        "fusion.": "oarl_core.fusion.",
+        "target_head.": "oarl_core.target_head.",
+        "global_norm.": "oarl_core.global_norm.",
+    }
+    if any(key.startswith("oarl_core.") for key in state_dict):
+        return state_dict
+    remapped = {}
+    for key, value in state_dict.items():
+        new_key = key
+        if key.startswith("oarl_adapter."):
+            new_key = "oarl_core." + key[len("oarl_adapter.") :]
+            remapped[new_key] = value
+            continue
+        for old_prefix, new_prefix in legacy_prefixes.items():
+            if key.startswith(old_prefix):
+                new_key = new_prefix + key[len(old_prefix) :]
+                break
+        remapped[new_key] = value
+    return remapped

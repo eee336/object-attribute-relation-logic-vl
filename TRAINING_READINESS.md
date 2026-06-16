@@ -189,6 +189,8 @@ python3 scripts/train_vla.py \
   --epochs 20 \
   --batch-size 32 \
   --hidden-dim 128 \
+  --action-head-type flow_matching \
+  --action-chunk-size 8 \
   --output checkpoints/oarlvla_grid_stage1.pt
 ```
 
@@ -197,15 +199,11 @@ Frozen modules: none.
 Trainable modules:
 
 - `text_encoder`
-- `object_encoder`
-- `graph_encoder`
-- `fusion`
-- `target_head`
+- `oarl_core` (`ObjectEncoder`, optional region projection, relation graph, fusion, target bottleneck, global/action-context pooling)
 - `program_head`
-- `action_head`
-- `global_norm`
+- `action_head` (`SmolStyleFlowActionHead` by default)
 
-Purpose: learn object token encoding, relation graph reasoning, target grounding, program/task classification, and target-conditioned action prediction from gold visual grid/cutout data.
+Purpose: learn object token encoding, relation graph reasoning, target grounding, program/task classification, and target-conditioned flow action prediction from gold visual grid/cutout data.
 
 ### Stage 2: Synthetic + Web Weak Warm-Up
 
@@ -227,21 +225,29 @@ python3 scripts/train_vla.py \
 
 Frozen modules:
 
-- `object_encoder`
-- `graph_encoder`
+- `object_encoder` / `oarl_core.object_encoder`
+- `graph_encoder` / `oarl_core.graph_encoder`
 - `action_head`
 
 Trainable modules:
 
 - `text_encoder` (including extended tokenizer embeddings)
-- `fusion`
-- `target_head`
 - `program_head`
-- `global_norm`
+- `oarl_core.fusion`
+- `oarl_core.target_head`
+- `oarl_core.global_norm`
 
 Purpose: adapt language/program/target selection to broader synthetic instructions and weak web tasks without damaging the Stage-1 object/relation/action foundations. Web weak samples have `target_index=-1`, so they only supervise program/task prediction and do not become fake target ground truth.
 
-### Optional Stage 3: Qwen-VL Adapter
+The default action head follows a lightweight SmolVLA-style flow-matching design:
+
+- Action labels are represented as chunks `[batch, chunk_size, action_dim]`.
+- Current synthetic/grid labels only provide `target_center [x, y, valid]`, so the loader expands that single step across the chunk.
+- Real robot datasets should replace this with true action chunks from LIBERO / ManiSkill / robomimic.
+- `action_flow_loss` trains the velocity field between Gaussian noise and action chunks; `action_mse` is still reported for the first predicted action step.
+- For quick legacy debugging, pass `--action-head-type mlp`.
+
+### Optional Stage 3: Qwen-VL-Backed OARL-VLA
 
 Command template:
 
@@ -254,7 +260,8 @@ python3 scripts/train_vla.py \
   --hidden-dim 128 \
   --vlm-backbone qwen_vl \
   --qwen-model-name Qwen/Qwen2.5-VL-3B-Instruct \
-  --output checkpoints/oarlvla_qwenvl_adapter.pt
+  --action-head-type flow_matching \
+  --output checkpoints/oarlvla_qwenvl.pt
 ```
 
 Default frozen modules:
@@ -264,13 +271,9 @@ Default frozen modules:
 Trainable modules:
 
 - Qwen projection/norm inside `QwenVLBackbone`
-- `object_encoder`
-- `graph_encoder`
-- `fusion`
-- `target_head`
+- `oarl_core`
 - `program_head`
-- `action_head`
-- `global_norm`
+- `action_head` flow action expert
 
 To unfreeze the full Qwen-VL backbone, pass:
 
@@ -359,3 +362,44 @@ Planned order:
 3. robomimic: export target-conditioned observation-action trajectories for offline imitation learning.
 
 Keep these behind optional imports; do not make core OARL-Bench depend on heavy simulator packages.
+
+## StarVLA / LIBERO Compute Route
+
+For full VLA training and LIBERO evaluation, use StarVLA as the external training/evaluation substrate while keeping OARL-VLA as the model architecture.
+
+Files:
+
+```text
+STARVLA_COMPUTE_RUNBOOK.md
+integrations/starvla/OARLVLAQwenPI.py
+integrations/starvla/oarlvla_qwenpi_libero.yaml
+integrations/starvla/run_oarlvla_libero_train.sh
+integrations/starvla/install_overlay.py
+```
+
+Compute-machine setup:
+
+```bash
+export OARLVLA_REPO=/path/to/object-attribute-relation-logic-vla
+git clone https://github.com/starVLA/starVLA.git /path/to/starVLA
+python "${OARLVLA_REPO}/integrations/starvla/install_overlay.py" \
+  --starvla-root /path/to/starVLA \
+  --oarlvla-root "${OARLVLA_REPO}" \
+  --force
+```
+
+The overlay registers `OARLVLAQwenPI` inside StarVLA. The model route is:
+
+```text
+Qwen-VL -> OARLReasoningCore -> Target Grounding Bottleneck -> StarVLA/QwenPI flow action head
+```
+
+Initial StarVLA runs can use `fallback_single_scene_token=true` to verify plumbing on existing LIBERO data. Paper-grade runs must add object candidates and target labels to each StarVLA example:
+
+```python
+example["oarl_object_features"]
+example["oarl_relation_edges"]
+example["oarl_relation_types"]
+example["oarl_target_index"]
+example["oarl_object_region_features"]  # optional
+```

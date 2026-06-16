@@ -14,6 +14,7 @@ def vla_collate_fn(samples: list[dict[str, Any]]) -> dict[str, Any]:
     feature_dim = samples[0]["object_features"].shape[-1]
     max_edges = max(sample["relation_edges"].shape[0] for sample in samples)
     object_features = torch.zeros(batch_size, max_objects, feature_dim, dtype=torch.float32)
+    object_region_features = None
     object_mask = torch.zeros(batch_size, max_objects, dtype=torch.bool)
     relation_edges = torch.zeros(batch_size, max_edges, 2, dtype=torch.long)
     relation_types = torch.zeros(batch_size, max_edges, dtype=torch.long)
@@ -23,11 +24,34 @@ def vla_collate_fn(samples: list[dict[str, Any]]) -> dict[str, Any]:
     target_center = torch.stack([sample["target_center"] for sample in samples], dim=0)
     task_type_id = torch.stack([sample["task_type_id"] for sample in samples], dim=0)
     has_gold_target = torch.tensor([bool(sample.get("has_gold_target", sample.get("target_id") is not None)) for sample in samples], dtype=torch.bool)
+    action_chunk = None
+    if any("action_chunk" in sample for sample in samples):
+        action_rows = []
+        for sample in samples:
+            if "action_chunk" in sample:
+                action_rows.append(sample["action_chunk"])
+            else:
+                action_rows.append(sample["target_center"].unsqueeze(0))
+        max_action_steps = max(row.shape[0] for row in action_rows)
+        action_dim = max(row.shape[-1] for row in action_rows)
+        action_chunk = torch.zeros(batch_size, max_action_steps, action_dim, dtype=torch.float32)
+        for idx, row in enumerate(action_rows):
+            action_chunk[idx, : row.shape[0], : row.shape[-1]] = row.float()
+    if any("object_region_features" in sample for sample in samples):
+        region_dim = max(
+            sample["object_region_features"].shape[-1]
+            for sample in samples
+            if "object_region_features" in sample
+        )
+        object_region_features = torch.zeros(batch_size, max_objects, region_dim, dtype=torch.float32)
 
     for idx, sample in enumerate(samples):
         num_objects = sample["object_features"].shape[0]
         num_edges = sample["relation_edges"].shape[0]
         object_features[idx, :num_objects] = sample["object_features"]
+        if object_region_features is not None and "object_region_features" in sample:
+            region_features = sample["object_region_features"].float()
+            object_region_features[idx, : region_features.shape[0], : region_features.shape[-1]] = region_features
         object_mask[idx, :num_objects] = True
         if num_edges:
             relation_edges[idx, :num_edges] = sample["relation_edges"]
@@ -37,6 +61,7 @@ def vla_collate_fn(samples: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "instruction_ids": instruction_ids,
         "object_features": object_features,
+        **({"object_region_features": object_region_features} if object_region_features is not None else {}),
         "relation_edges": relation_edges,
         "relation_types": relation_types,
         "object_mask": object_mask,
@@ -45,6 +70,7 @@ def vla_collate_fn(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "target_center": target_center,
         "task_type_id": task_type_id,
         "has_gold_target": has_gold_target,
+        **({"action_chunk": action_chunk} if action_chunk is not None else {}),
         "sample_id": [sample["sample_id"] for sample in samples],
         "instruction": [sample["instruction"] for sample in samples],
         "task_type": [sample["task_type"] for sample in samples],

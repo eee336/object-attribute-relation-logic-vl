@@ -97,16 +97,23 @@ Minimum acceptable package:
 
 4. **VLM/VLA comparison**
    - Qwen-VL direct target answer on grid images.
-   - Qwen-VL + OARL head.
+   - Qwen-VL direct policy without OARL target bottleneck.
+   - Full OARL-VLA-Qwen with OARL reasoning core and target-conditioned flow policy.
    - OpenVLA-style or VLA-Adapter/OpenVLA baseline if feasible.
-   - Current status: Qwen-VL adapter exists; direct VLM baseline not yet implemented.
+   - Current status: Qwen-VL-backed OARL-VLA path exists; direct VLM/direct policy baselines are not yet implemented.
 
-5. **Real-image verified subset**
+5. **StarVLA / LIBERO execution path**
+   - Implement `OARLVLAQwenPI` as a StarVLA framework variant.
+   - Use StarVLA for LIBERO dataloaders, action normalization, training, checkpointing, and evaluation.
+   - Keep OARL-VLA as the model architecture: `Qwen-VL -> OARLReasoningCore -> Target Grounding Bottleneck -> flow action policy`.
+   - Current status: overlay files and compute runbook are implemented; compute-machine execution pending.
+
+6. **Real-image verified subset**
    - Build 200-1000 manually verified examples from web/local images.
    - Must include bbox/target id for strict evaluation.
    - Current status: web weak builder exists; manual verified evaluation set missing.
 
-6. **Reproducibility package**
+7. **Reproducibility package**
    - One command for dataset generation/training/eval.
    - Seeds and configs recorded.
    - Current status: `scripts/run_stage_pipeline.py` exists; needs torch execution logs and final result tables.
@@ -172,7 +179,7 @@ Priority 4: build verified real-image OARL-Bench subset.
 |---|---|---|
 | Synthetic-only | "This is toy data." | Include grid/cutout visuals and a verified real-image subset; emphasize diagnostic benchmark rather than robotics deployment |
 | Rule reasoner too strong | "The method is just hand-coded." | Report learned OARL-VLA and ablations; use rule reasoner as oracle/upper bound |
-| No real VLA baseline | "Not competitive with recent VLA papers." | Add Qwen-VL/OpenVLA/VLA-Adapter-style direct grounding baselines |
+| No real VLA baseline | "Not competitive with recent VLA papers." | Run OARL-VLA and direct VLA baselines under StarVLA/LIBERO, plus Qwen-VL/OpenVLA-style direct grounding baselines |
 | Too broad task taxonomy | "Many tasks, shallow treatment." | Keep taxonomy but report systematic per-task analysis and failure modes |
 | Weak web labels | "Noisy labels." | State weak labels are for pretraining/candidate mining only; final eval uses gold/verified labels |
 | Page limit | "Unclear contributions." | Main paper claims only problem, benchmark, method, experiments; pipeline details in supplement |

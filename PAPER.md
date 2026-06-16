@@ -262,21 +262,25 @@ Program = Step1 -> Step2 -> ... -> StepN
 ### 7.1 模块
 
 - 文本编码：`TextEncoder`（小模型，或 qwen_vl 适配）
-- 对象编码：`ObjectEncoder`
-- 关系编码：`SimpleRelationGraphEncoder`
-- 融合：`CrossAttentionFusion`
-- 目标头：`TargetGroundingHead`
+- OARL 推理核心：`OARLReasoningCore`
+  - 对象编码：`ObjectEncoder`
+  - 可选 region feature projection：用于 object crop / mask / detector region embedding
+  - 关系编码：`SimpleRelationGraphEncoder`
+  - 融合：`CrossAttentionFusion`
+  - 目标定位瓶颈：`TargetGroundingHead`
 - 程序头：`ProgramHead`
-- 动作头：`ActionHead`
+- 动作头：`SmolStyleFlowActionHead`（SmolVLA-inspired flow-matching action chunk decoder）
 
 ### 7.2 路由
 
 ```text
 image/scene + instruction + object features + relation graph
-    -> 融合模块
-    -> target_logits (目标分类)
+    -> OARLReasoningCore
+    -> fused_object_tokens
+    -> target_logits (目标定位瓶颈)
     -> 选择 target token
-    -> 动作回归 / 分类 (ActionHead)
+    -> target-conditioned action context
+    -> flow-matching action chunk decoder
     -> program_logits (任务类型/程序类型监督)
 ```
 
@@ -287,6 +291,22 @@ image/scene + instruction + object features + relation graph
 - `vlm_backbone=tiny`（默认轻量）
 - `vlm_backbone=qwen_vl`（基于 Hugging Face 的 Qwen-VL，可冻结/解冻）
 - `image_mode=symbolic`（结构化特征）或 `cnn_stub`（简易 CNN）
+- `region_feature_dim>0`：开启 object region feature 融合，用于后续接入检测/分割得到的 crop/mask/region embedding
+- `action_head_type=flow_matching`（默认）：从噪声 action chunk 出发，结合 target token、global token、instruction/Qwen embedding 和 fused object tokens 预测 velocity field，并通过迭代去噪采样 action chunk
+- `action_head_type=mlp`：旧版单步动作回归，仅用于快速消融或调试
+
+### 7.4 StarVLA-compatible implementation
+
+为了在 LIBERO 等真实 VLA benchmark 上训练和评测，我们提供 `OARLVLAQwenPI` 的 StarVLA framework variant。该实现复用 StarVLA 的 dataloader、action normalization、trainer、checkpoint 和 LIBERO evaluator，但模型结构仍是 OARL-VLA：
+
+```text
+Qwen-VL backbone
+    -> OARLReasoningCore
+    -> Target Grounding Bottleneck
+    -> target-conditioned QwenPI/flow action policy
+```
+
+这一路线使实验可以和 `QwenPI/QwenOFT/QwenGR00T` 等 StarVLA baseline 在同一训练与评测协议下对比，同时保留 OARL-VLA 的 target-first 架构差异。
 
 ---
 
@@ -375,13 +395,14 @@ It runs `full`, `no_relation_graph`, `no_attribute_state`, `no_group_candidates`
 3. `Attribute-Ignorant`
 4. `Relation-Ignorant`
 5. `OARL-VLA Logic Reasoner`
-6. `OARL-VLA`（可训练模型）
+6. `OARL-VLA Tiny`：不使用大 VLM 的轻量可训练版本，用于验证 target-first 架构。
 
 AAAI 版还必须补充：
 
 7. `Direct VLM Grounding`：Qwen-VL / InternVL / GPT-4o-style model 直接从图像和指令回答目标。
-8. `Qwen-VL + OARL Head`：使用 Qwen-VL 作为冻结视觉语言骨干，训练 target/program/action head。
-9. `Direct VLA / OpenVLA-style Baseline`：若资源允许，加入 OpenVLA 或同类开源 VLA 的目标选择/执行结果。
+8. `Qwen-VL Direct Policy`：使用 Qwen-VL 特征直接训练 program/action head，不经过 OARL target bottleneck。
+9. `OARL-VLA-Qwen`：完整模型，使用 Qwen-VL/text backbone + OARLReasoningCore + Target Grounding Bottleneck + target-conditioned flow action policy。
+10. `Direct VLA / OpenVLA-style Baseline`：若资源允许，加入 OpenVLA 或同类开源 VLA 的目标选择/执行结果。
 
 ### 9.2 指标
 
@@ -538,7 +559,7 @@ python scripts/run_demo.py --seed 2 --instruction-type group_grounding
 - 逻辑推理器、程序执行器、基线、奖励模型、可视化
 - 合成场景与任务生成
 - grid/world asset 下载裁剪 + stage-1 合成图像数据
-- 轻量模型训练与评测（含 qwen_vl adapter）
+- OARL-VLA 完整模型训练与评测（含 qwen_vl backbone 路径）
 - web 数据构建、quality filter、去重、人工复核 HTML
 - 全量测试覆盖
 

@@ -250,11 +250,12 @@ The first version uses rules to suggest more data for low-accuracy or under-samp
 The trainable model in `src/oarlvla/models/` is a tiny symbolic OARL-VLA prototype. It is not a large-scale pretrained VLA. Its role is to verify that the project schema can drive a learnable loop:
 
 ```text
-scene/image features + instruction + object tokens + relation graph
-→ multimodal fusion
-→ target grounding
+scene/image features + instruction
+→ object-centric scene tokens
+→ OARL reasoning core
+→ target grounding bottleneck
 → program/task prediction
-→ action prediction
+→ target-conditioned flow-matching action chunk prediction
 → multi-task loss
 ```
 
@@ -262,18 +263,19 @@ scene/image features + instruction + object tokens + relation graph
 flowchart TD
     A[Instruction] --> B[Text Encoder]
     C[Image / Scene] --> D[Image or Symbolic Encoder]
-    E[Object Features] --> F[Object Token Encoder]
-    G[Relation Graph] --> H[Relation Graph Encoder]
-    B --> I[Multimodal Fusion]
-    D --> I
-    F --> H
-    H --> I
-    I --> J[Target Grounding Head]
+    E[Object Features] --> CORE[OARL Reasoning Core]
+    R[Optional Object Region Features] --> CORE
+    G[Relation Graph] --> CORE
+    B --> CORE
+    D --> CORE
+    CORE --> I[Fused Object Tokens]
+    CORE --> J[Target Grounding Bottleneck]
     I --> K[Program Head]
     J --> L[Selected Target Token]
-    L --> M[Action Head]
+    I --> M[Target-conditioned Flow Action Policy]
+    L --> M
     K --> N[Program Type / Logic Class]
-    M --> O[Robot Action]
+    M --> O[Action Chunk]
 ```
 
 Current components:
@@ -281,16 +283,18 @@ Current components:
 - `vlm_backbone="tiny"` keeps the lightweight `SimpleTokenizer` plus GRU `TextEncoder`, with no large tokenizer dependency.
 - `vlm_backbone="qwen_vl"` loads a Qwen-VL/Qwen2.5-VL style Hugging Face backbone through `QwenVLBackbone`; its pooled multimodal hidden state becomes the instruction/image embedding fused with object and relation tokens.
 - `QwenVLProcessorAdapter` builds Qwen chat messages and uses `AutoProcessor`; when available, `qwen-vl-utils` handles image/video preprocessing.
+- `OARLReasoningCore`, the model's object-centric reasoning core containing `ObjectEncoder`, optional region-feature projection, `SimpleRelationGraphEncoder`, `CrossAttentionFusion`, `TargetGroundingHead`, and global/action-context pooling.
 - `ObjectEncoder` over a fixed 35-dimensional symbolic feature vector.
+- Optional `object_region_features [batch, num_candidates, region_dim]` can be fused into object tokens through `OARLVLAConfig.region_feature_dim`; this is the intended hook for object crop, mask, or detector/segmenter region embeddings.
 - Attribute/state inputs: `black_spot_ratio`, `ripeness`, `is_blackened`, `is_rotten`, `is_edible`, `volume_ml`, `fill_level`, `is_opened`, `is_empty`, `cleanliness`, `is_broken`, `is_wearable`.
 - `SimpleRelationGraphEncoder`, a lightweight batched message-passing layer over `edge_index` and `edge_type`; it does not require PyG.
 - `CrossAttentionFusion`, where object tokens attend to instruction/image context.
 - `TargetGroundingHead`, producing `[batch, num_candidates]` target logits.
 - `ProgramHead`, currently predicting task/program type classification rather than autoregressive programs.
-- `ActionHead`, predicting `[x, y, gripper]` from the selected/fused target token.
-- Multi-task loss: `target_loss + 0.5 * action_loss + 0.2 * program_loss`.
+- `SmolStyleFlowActionHead`, a lightweight SmolVLA-inspired flow-matching action expert. It embeds noisy action chunks plus a sinusoidal timestep, attends to `global token + selected target token + text/Qwen token + fused object tokens`, predicts the velocity field, and samples an action chunk by iterative denoising. `action_head_type="mlp"` remains available for legacy/debug runs.
+- Multi-task loss: `target_loss + 0.5 * action_flow_loss + 0.2 * program_loss`, while `action_mse` is still reported against the first predicted action step for quick diagnostics.
 
-The raw image path is reserved through both `SimpleCNNImageEncoder` (`image_mode=cnn_stub`) and the Qwen-VL adapter. The default fast training path remains `vlm_backbone=tiny`, `image_mode=symbolic`, using synthetic scene object features.
+The raw image path is reserved through both `SimpleCNNImageEncoder` (`image_mode=cnn_stub`) and the Qwen-VL backbone path. The default fast training path remains `vlm_backbone=tiny`, `image_mode=symbolic`, using synthetic scene object features.
 
 Install PyTorch before model training:
 
@@ -322,10 +326,22 @@ python scripts/train_vla.py \
   --hidden-dim 128 \
   --vlm-backbone qwen_vl \
   --qwen-model-name Qwen/Qwen2.5-VL-3B-Instruct \
-  --output checkpoints/oarlvla_qwenvl_adapter.pt
+  --output checkpoints/oarlvla_qwenvl.pt
 ```
 
 This downloads/loads the Qwen checkpoint through Transformers. Use a small batch size on CPU; GPU or MPS is recommended for real Qwen-VL training. By default the Qwen-VL backbone is frozen and only the OARL-VLA projection/fusion/heads train.
+
+Action head controls:
+
+```bash
+python scripts/train_vla.py \
+  --dataset data/oarlvla_synthetic.jsonl \
+  --action-head-type flow_matching \
+  --action-chunk-size 8 \
+  --action-denoise-steps 10
+```
+
+The prototype default is `chunk_size=8` for fast CPU tests. For LIBERO / ManiSkill / robomimic-scale experiments, use larger chunks such as 16-50 once real action trajectories are available.
 
 ### Train Tiny VLA
 
@@ -516,14 +532,14 @@ This generates a tiny synthetic batch and trains until the target grounding head
 
 ### Model Limits and Upgrade Path
 
-Current implementation has two modes: a tiny symbolic mode for fast CPU tests and a Qwen-VL adapter mode for VLM-backed experiments. It is still not a pretrained robotics foundation model. It validates object tokens, attribute/state features, relation graph encoding, Qwen/text instruction encoding, target grounding, action prediction, and multi-task training.
+Current implementation has two modes: a tiny symbolic mode for fast CPU tests and a Qwen-VL-backed OARL-VLA mode for VLM-grounded experiments. It is still not a large-scale robot-pretrained foundation policy, but it is a full target-first VLA architecture: object tokens, attribute/state features, relation graph encoding, Qwen/text instruction encoding, target grounding bottleneck, flow action policy, and multi-task training.
 
 Upgrade path:
 
-- Use the Qwen-VL adapter as the default multimodal backbone, then fine-tune with LoRA/QLoRA instead of full-weight training.
+- Use Qwen-VL as the default multimodal backbone inside OARL-VLA, then fine-tune with LoRA/QLoRA instead of full-weight training.
 - Replace or compare Qwen-VL with CLIP, SigLIP, DINOv2, InternVL, LLaVA, or a task-specific visual encoder.
 - Feed object candidates from GroundingDINO/OWL-ViT plus SAM/SAM2 masks.
-- Replace the MLP action head with diffusion policy, action tokenizer, or OpenVLA-style action decoder.
+- Extend the current SmolVLA-style flow action head with real robot action chunks, action masks, and benchmark-specific continuous action normalization.
 - Use web weak data for SFT/preference warm-up, then promote verified data into evaluation.
 - Use the existing reward model for RL or preference post-training.
 
@@ -555,7 +571,9 @@ AAAI 投稿路线见 [AAAI_SUBMISSION_PLAN.md](AAAI_SUBMISSION_PLAN.md)。该文
 
 训练迁移清单见 [TRAINING_READINESS.md](TRAINING_READINESS.md)。当前已经生成 `data/training_bundle/`，包含 train/val/test split、manifest 和可在算力机器执行的 `compute_training_commands.sh`。
 
-LIBERO / ManiSkill / robomimic 后续评测配置见 [configs/external_benchmarks.yaml](configs/external_benchmarks.yaml)，当前作为 optional adapters 规划，不引入重依赖。
+StarVLA/LIBERO 算力机执行说明见 [STARVLA_COMPUTE_RUNBOOK.md](STARVLA_COMPUTE_RUNBOOK.md)。`integrations/starvla/` 提供 `OARLVLAQwenPI` framework overlay，用 StarVLA 的 LIBERO dataloader/trainer/evaluator 跑我们的完整 OARL-VLA，而不是把模型降级成外部插件。
+
+LIBERO / ManiSkill / robomimic 后续评测配置见 [configs/external_benchmarks.yaml](configs/external_benchmarks.yaml)，当前作为 optional benchmark integrations 规划，不引入重依赖。
 
 你可以用下面命令把基准结果转成论文可贴表格：
 
